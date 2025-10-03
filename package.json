@@ -6,17 +6,31 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint . --ext .ts,.tsx,.vue --max-warnings=0"
   },
   "dependencies": {
-    "vue": "^3.5.22"
+    "@tailwindcss/vite": "^4.1.14",
+    "dexie": "^4.2.0",
+    "lucide-vue-next": "^0.544.0",
+    "tailwindcss": "^4.1.14",
+    "vue": "^3.5.22",
+    "vue-router": "^4.5.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.36.0",
     "@types/node": "^24.6.0",
     "@vitejs/plugin-vue": "^6.0.1",
+    "@vue/eslint-config-prettier": "^10.2.0",
+    "@vue/eslint-config-typescript": "^14.6.0",
     "@vue/tsconfig": "^0.8.1",
+    "daisyui": "^5.1.26",
+    "eslint": "^9.36.0",
+    "eslint-plugin-vue": "^10.5.0",
+    "typescript-eslint": "^8.21.0",
     "typescript": "~5.9.3",
     "vite": "^7.1.7",
+    "vite-plugin-eslint": "^1.8.1",
     "vue-tsc": "^3.1.0"
   }
 }
