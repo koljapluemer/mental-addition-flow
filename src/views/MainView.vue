@@ -262,13 +262,13 @@ async function submitEvaluation(rating: number) {
     userId: activeUserId.value,
     scope: evaluationScope.value,
     rating,
-    exerciseIds: evaluationExerciseIds.value,
+    exerciseIds: [...evaluationExerciseIds.value],
     mode: mode.value,
   });
 
   if (evaluation?.id) {
     await attachEvaluation(
-      evaluationExerciseIds.value,
+      [...evaluationExerciseIds.value],
       evaluation.id,
       activeUserId.value,
     );
