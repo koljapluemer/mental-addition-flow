@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
-import { Home, Settings as SettingsIcon, ListTree } from "lucide-vue-next";
+import { Home, Settings as SettingsIcon, ListTree, BarChart3 } from "lucide-vue-next";
 import { useActiveUser } from "@/composables/useActiveUser";
 
 const route = useRoute();
@@ -9,8 +9,9 @@ const { activeUserName } = useActiveUser();
 
 const navItems = [
   { name: "Main", to: "/", icon: Home },
-  { name: "Settings", to: "/settings", icon: SettingsIcon },
+  { name: "Stats", to: "/stats", icon: BarChart3 },
   { name: "Logs", to: "/logs", icon: ListTree },
+  { name: "Settings", to: "/settings", icon: SettingsIcon },
 ];
 
 const currentPath = computed(() => route.path);
