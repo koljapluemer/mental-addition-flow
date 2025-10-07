@@ -1,25 +1,35 @@
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { liveQuery } from "dexie";
 import Dexie from "dexie";
-import { db, type EvaluationRecord, type ExerciseRecord } from "@/db";
+import {
+  db,
+  type EvaluationRecord,
+  type ExerciseRecord,
+  type ExerciseMode,
+} from "@/db";
 import { useActiveUser } from "@/composables/useActiveUser";
 
-interface ExerciseLogEntry {
-  exercise: ExerciseRecord;
-  evaluation: EvaluationRecord | null;
-  eventCount: number;
+interface LogEntry {
+  id: string;
+  type: "exercise" | "evaluation";
+  timestamp: number;
+  exercise?: ExerciseRecord;
+  evaluation?: EvaluationRecord;
+  eventCount?: number;
 }
 
 const { activeUserId } = useActiveUser();
-const entries = ref<ExerciseLogEntry[]>([]);
+const allEntries = ref<LogEntry[]>([]);
+const modeFilter = ref<ExerciseMode | "all">("all");
+const evaluatedFilter = ref<"all" | "with" | "without">("all");
 let subscription: { unsubscribe: () => void } | null = null;
 
 watch(
   () => activeUserId.value,
   (userId) => {
     subscription?.unsubscribe();
-    entries.value = [];
+    allEntries.value = [];
 
     if (!userId) {
       return;
@@ -30,17 +40,15 @@ watch(
         .where("[userId+displayedAt]")
         .between([userId, Dexie.minKey], [userId, Dexie.maxKey])
         .reverse()
-        .limit(100)
+        .limit(200)
         .toArray();
 
-      const evaluationIds = exercises
-        .map((exercise) => exercise.evaluationId)
-        .filter((id): id is number => typeof id === "number");
-
-      const uniqueEvaluationIds = Array.from(new Set(evaluationIds));
-      const evaluations = uniqueEvaluationIds.length
-        ? await db.evaluations.bulkGet(uniqueEvaluationIds)
-        : [];
+      const evaluations = await db.evaluations
+        .where("userId")
+        .equals(userId)
+        .reverse()
+        .limit(100)
+        .toArray();
 
       const evaluationMap = new Map<number, EvaluationRecord>();
       evaluations.forEach((evaluation) => {
@@ -49,26 +57,36 @@ watch(
         }
       });
 
-      const enriched = await Promise.all(
+      const exerciseEntries: LogEntry[] = await Promise.all(
         exercises.map(async (exercise) => {
           const eventCount = exercise.id
             ? await db.events.where("exerciseId").equals(exercise.id).count()
             : 0;
-          const evaluation = exercise.evaluationId
-            ? (evaluationMap.get(exercise.evaluationId) ?? null)
-            : null;
           return {
+            id: `exercise-${exercise.id}`,
+            type: "exercise" as const,
+            timestamp: exercise.displayedAt,
             exercise,
-            evaluation,
             eventCount,
           };
         }),
       );
 
-      return enriched;
+      const evaluationEntries: LogEntry[] = evaluations.map((evaluation) => ({
+        id: `evaluation-${evaluation.id}`,
+        type: "evaluation" as const,
+        timestamp: evaluation.createdAt,
+        evaluation,
+      }));
+
+      const combined = [...exerciseEntries, ...evaluationEntries].sort(
+        (a, b) => b.timestamp - a.timestamp,
+      );
+
+      return combined;
     }).subscribe({
       next(data) {
-        entries.value = data ?? [];
+        allEntries.value = data ?? [];
       },
     });
   },
@@ -77,6 +95,33 @@ watch(
 
 onUnmounted(() => {
   subscription?.unsubscribe();
+});
+
+const filteredEntries = computed(() => {
+  return allEntries.value.filter((entry) => {
+    // Filter by mode
+    if (modeFilter.value !== "all") {
+      if (entry.type === "exercise" && entry.exercise?.mode !== modeFilter.value) {
+        return false;
+      }
+      if (entry.type === "evaluation" && entry.evaluation?.mode !== modeFilter.value) {
+        return false;
+      }
+    }
+
+    // Filter by evaluation status (only applies to exercises)
+    if (evaluatedFilter.value !== "all" && entry.type === "exercise") {
+      const hasEvaluation = !!entry.exercise?.evaluationId;
+      if (evaluatedFilter.value === "with" && !hasEvaluation) {
+        return false;
+      }
+      if (evaluatedFilter.value === "without" && hasEvaluation) {
+        return false;
+      }
+    }
+
+    return true;
+  });
 });
 
 function formatTimestamp(timestamp?: number) {
@@ -93,76 +138,133 @@ function formatDuration(exercise: ExerciseRecord) {
 </script>
 
 <template>
-  <section class="mx-auto flex w-full max-w-5xl flex-col gap-6 py-12">
+  <section class="mx-auto flex w-full max-w-6xl flex-col gap-6 py-12">
     <header>
-      <h1 class="text-3xl font-bold">Recent exercises</h1>
+      <h1 class="text-3xl font-bold">Activity Log</h1>
       <p class="text-base-content/60">
-        Showing the latest 100 additions with mode, timing, and evaluation data.
+        Exercise and evaluation history with filtering options
       </p>
     </header>
 
-    <div v-if="entries.length" class="grid gap-4 md:grid-cols-2">
-      <article
-        v-for="entry in entries"
-        :key="entry.exercise.id"
-        class="card border border-base-300 bg-base-100 shadow"
-      >
-        <div class="card-body space-y-3">
-          <div class="flex items-center justify-between">
-            <h2 class="text-2xl font-black">
-              {{ entry.exercise.operandA }} + {{ entry.exercise.operandB }}
-            </h2>
-            <span
-              class="badge"
-              :class="
-                entry.exercise.mode === 'serious'
-                  ? 'badge-error'
-                  : 'badge-neutral'
-              "
-            >
-              {{ entry.exercise.mode.toUpperCase() }}
-            </span>
-          </div>
-          <div class="grid grid-cols-2 gap-2 text-sm text-base-content/70">
-            <div>
-              <p class="font-semibold uppercase tracking-wide">Shown</p>
-              <p>{{ formatTimestamp(entry.exercise.displayedAt) }}</p>
-            </div>
-            <div>
-              <p class="font-semibold uppercase tracking-wide">Solved</p>
-              <p>{{ formatTimestamp(entry.exercise.solvedAt) }}</p>
-            </div>
-            <div>
-              <p class="font-semibold uppercase tracking-wide">Duration</p>
-              <p>{{ formatDuration(entry.exercise) }}</p>
-            </div>
-            <div>
-              <p class="font-semibold uppercase tracking-wide">Events</p>
-              <p>{{ entry.eventCount }}</p>
-            </div>
-          </div>
-          <div
-            v-if="entry.evaluation"
-            class="rounded-lg bg-primary/10 p-3 text-sm"
+    <div class="flex flex-wrap gap-4">
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Mode</span>
+        </label>
+        <select v-model="modeFilter" class="select select-bordered">
+          <option value="all">All modes</option>
+          <option value="trial">Trial only</option>
+          <option value="serious">Serious only</option>
+        </select>
+      </div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Evaluation</span>
+        </label>
+        <select v-model="evaluatedFilter" class="select select-bordered">
+          <option value="all">All</option>
+          <option value="with">With evaluation</option>
+          <option value="without">Without evaluation</option>
+        </select>
+      </div>
+    </div>
+
+    <div v-if="filteredEntries.length" class="overflow-x-auto">
+      <table class="table table-zebra">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Details</th>
+            <th>Mode</th>
+            <th>Duration</th>
+            <th>Events</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="entry in filteredEntries"
+            :key="entry.id"
+            :class="{
+              'bg-warning/20': entry.type === 'evaluation',
+            }"
           >
-            <p class="font-semibold">
-              Effort rating: {{ entry.evaluation.rating }}
-            </p>
-            <p class="text-base-content/70">
-              Scope: {{ entry.evaluation.scope }}
-            </p>
-          </div>
-          <div v-else class="text-sm text-base-content/60">
-            No evaluation captured
-          </div>
-        </div>
-      </article>
+            <td class="text-xs">{{ formatTimestamp(entry.timestamp) }}</td>
+            <td>
+              <span
+                v-if="entry.type === 'evaluation'"
+                class="badge badge-warning badge-sm"
+                >Effort Rating</span
+              >
+              <span v-else class="badge badge-ghost badge-sm">Exercise</span>
+            </td>
+            <td>
+              <div v-if="entry.type === 'exercise' && entry.exercise">
+                <span class="font-mono font-bold">
+                  {{ entry.exercise.operandA }} + {{ entry.exercise.operandB }} =
+                  {{ entry.exercise.answer }}
+                </span>
+                <span
+                  v-if="!entry.exercise.wasCorrect"
+                  class="ml-2 text-error"
+                  >(incorrect)</span
+                >
+              </div>
+              <div v-if="entry.type === 'evaluation' && entry.evaluation">
+                <span class="font-semibold"
+                  >Rating: {{ entry.evaluation.rating }}/9</span
+                >
+                <span class="ml-2 text-sm text-base-content/60"
+                  >({{ entry.evaluation.scope }})</span
+                >
+              </div>
+            </td>
+            <td>
+              <span
+                v-if="entry.type === 'exercise' && entry.exercise"
+                class="badge badge-sm"
+                :class="
+                  entry.exercise.mode === 'serious'
+                    ? 'badge-error'
+                    : 'badge-neutral'
+                "
+              >
+                {{ entry.exercise.mode }}
+              </span>
+              <span
+                v-if="entry.type === 'evaluation' && entry.evaluation"
+                class="badge badge-sm"
+                :class="
+                  entry.evaluation.mode === 'serious'
+                    ? 'badge-error'
+                    : 'badge-neutral'
+                "
+              >
+                {{ entry.evaluation.mode }}
+              </span>
+            </td>
+            <td>
+              <span v-if="entry.type === 'exercise' && entry.exercise">
+                {{ formatDuration(entry.exercise) }}
+              </span>
+              <span v-else class="text-base-content/40">—</span>
+            </td>
+            <td>
+              <span v-if="entry.type === 'exercise'">
+                {{ entry.eventCount ?? 0 }}
+              </span>
+              <span v-else class="text-base-content/40">—</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     <div
       v-else
       class="rounded-2xl border border-dashed border-base-300 p-10 text-center text-base-content/60"
     >
-      No exercise data yet. Complete a few exercises to see logs here.
+      No data to display. Complete a few exercises to see logs here.
     </div>
   </section>
 </template>
