@@ -126,6 +126,17 @@ function formatDuration(exercise: ExerciseRecord) {
   const seconds = (duration / 1000).toFixed(2);
   return `${seconds}s`;
 }
+
+function getKeystrokeEfficiency(exercise: ExerciseRecord): "perfect" | "good" | "poor" | null {
+  if (exercise.keystrokeCount === undefined) return null;
+
+  const answerLength = exercise.answer.toString().length;
+  const excess = exercise.keystrokeCount - answerLength;
+
+  if (excess === 0) return "perfect";
+  if (excess <= 2) return "good";
+  return "poor";
+}
 </script>
 
 <template>
@@ -178,7 +189,7 @@ function formatDuration(exercise: ExerciseRecord) {
             v-for="entry in filteredEntries"
             :key="entry.id"
             :class="{
-              'bg-warning/20': entry.type === 'evaluation',
+              '!bg-warning/30': entry.type === 'evaluation',
             }"
           >
             <td class="text-xs">{{ formatTimestamp(entry.timestamp) }}</td>
@@ -197,9 +208,9 @@ function formatDuration(exercise: ExerciseRecord) {
                   {{ entry.exercise.answer }}
                 </span>
                 <span
-                  v-if="!entry.exercise.wasCorrect"
-                  class="ml-2 text-error"
-                  >(incorrect)</span
+                  v-if="!entry.exercise.solvedAt"
+                  class="ml-2 text-base-content/50 text-xs"
+                  >(unsolved)</span
                 >
               </div>
               <div v-if="entry.type === 'evaluation' && entry.evaluation">
@@ -242,14 +253,23 @@ function formatDuration(exercise: ExerciseRecord) {
               <span v-else class="text-base-content/40">—</span>
             </td>
             <td>
-              <span
+              <div
                 v-if="
                   entry.type === 'exercise' &&
                   entry.exercise?.keystrokeCount !== undefined
                 "
+                class="flex items-center gap-2"
               >
-                {{ entry.exercise.keystrokeCount }}
-              </span>
+                <div
+                  class="h-3 w-3 rounded-full"
+                  :class="{
+                    'bg-success': getKeystrokeEfficiency(entry.exercise) === 'perfect',
+                    'bg-warning': getKeystrokeEfficiency(entry.exercise) === 'good',
+                    'bg-error': getKeystrokeEfficiency(entry.exercise) === 'poor',
+                  }"
+                ></div>
+                <span>{{ entry.exercise.keystrokeCount }}</span>
+              </div>
               <span v-else class="text-base-content/40">—</span>
             </td>
           </tr>

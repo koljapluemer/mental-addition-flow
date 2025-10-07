@@ -87,7 +87,7 @@ async function startNewExercise(forceMode?: ExerciseMode) {
         .where({ userId: activeUserId.value })
         .and(
           (ex) =>
-            ex.wasCorrect === true &&
+            ex.solvedAt !== undefined &&
             ex.displayedAt >= (progressiveDifficultyActivatedAt.value ?? 0),
         )
         .count();

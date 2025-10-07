@@ -18,7 +18,6 @@ export interface ExerciseRecord {
   displayedAt: number;
   solvedAt?: number;
   mode: ExerciseMode;
-  wasCorrect: boolean;
   evaluationId?: number;
   keystrokeCount?: number;
 }

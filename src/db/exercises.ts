@@ -22,7 +22,6 @@ export async function createExerciseRecord({
     answer,
     displayedAt,
     mode,
-    wasCorrect: false,
   });
 
   await logEvent({
@@ -57,7 +56,6 @@ export async function markExerciseSolved(
   const solvedAt = Date.now();
   await db.exercises.update(exerciseId, {
     solvedAt,
-    wasCorrect: true,
     keystrokeCount,
   });
   await logEvent({
