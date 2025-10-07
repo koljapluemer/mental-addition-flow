@@ -16,7 +16,6 @@ interface LogEntry {
   timestamp: number;
   exercise?: ExerciseRecord;
   evaluation?: EvaluationRecord;
-  eventCount?: number;
 }
 
 const { activeUserId } = useActiveUser();
@@ -57,20 +56,12 @@ watch(
         }
       });
 
-      const exerciseEntries: LogEntry[] = await Promise.all(
-        exercises.map(async (exercise) => {
-          const eventCount = exercise.id
-            ? await db.events.where("exerciseId").equals(exercise.id).count()
-            : 0;
-          return {
-            id: `exercise-${exercise.id}`,
-            type: "exercise" as const,
-            timestamp: exercise.displayedAt,
-            exercise,
-            eventCount,
-          };
-        }),
-      );
+      const exerciseEntries: LogEntry[] = exercises.map((exercise) => ({
+        id: `exercise-${exercise.id}`,
+        type: "exercise" as const,
+        timestamp: exercise.displayedAt,
+        exercise,
+      }));
 
       const evaluationEntries: LogEntry[] = evaluations.map((evaluation) => ({
         id: `evaluation-${evaluation.id}`,
@@ -179,7 +170,7 @@ function formatDuration(exercise: ExerciseRecord) {
             <th>Details</th>
             <th>Mode</th>
             <th>Duration</th>
-            <th>Events</th>
+            <th>Keystrokes</th>
           </tr>
         </thead>
         <tbody>
@@ -251,8 +242,13 @@ function formatDuration(exercise: ExerciseRecord) {
               <span v-else class="text-base-content/40">—</span>
             </td>
             <td>
-              <span v-if="entry.type === 'exercise'">
-                {{ entry.eventCount ?? 0 }}
+              <span
+                v-if="
+                  entry.type === 'exercise' &&
+                  entry.exercise?.keystrokeCount !== undefined
+                "
+              >
+                {{ entry.exercise.keystrokeCount }}
               </span>
               <span v-else class="text-base-content/40">—</span>
             </td>

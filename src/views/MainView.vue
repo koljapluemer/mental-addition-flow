@@ -39,6 +39,7 @@ const evaluationExerciseIds = ref<number[]>([]);
 const evaluationOptions = Array.from({ length: 9 }, (_, index) => index + 1);
 const selectedEvaluationRating = ref<number | null>(null);
 const answerInputRef = ref<HTMLInputElement | null>(null);
+const keystrokeCount = ref(0);
 
 const evaluationScopes: EvaluationScope[] = [
   "this task",
@@ -70,6 +71,7 @@ function resetState() {
   evaluationExerciseIds.value = [];
   mode.value = "trial";
   selectedEvaluationRating.value = null;
+  keystrokeCount.value = 0;
 }
 
 async function startNewExercise(forceMode?: ExerciseMode) {
@@ -106,6 +108,7 @@ async function startNewExercise(forceMode?: ExerciseMode) {
     });
     currentExercise.value = exercise ?? null;
     inputValue.value = "";
+    keystrokeCount.value = 0;
     await nextTick();
     answerInputRef.value?.focus();
   } finally {
@@ -163,6 +166,12 @@ async function handleInput(event: Event) {
 async function handleKeydown(event: KeyboardEvent) {
   if (!activeUserId.value || !currentExercise.value) return;
 
+  // Count meaningful keystrokes: digits, backspace, delete
+  const key = event.key;
+  if (/^[0-9]$/.test(key) || key === "Backspace" || key === "Delete") {
+    keystrokeCount.value++;
+  }
+
   await logEvent({
     userId: activeUserId.value,
     type: "input_keydown",
@@ -211,6 +220,7 @@ async function handleCorrectAnswer() {
     userId: activeUserId.value,
     inputValue: inputValue.value,
     mode: mode.value,
+    keystrokeCount: keystrokeCount.value,
   });
 
   const shouldPrompt = Math.random() < evaluationProbability;

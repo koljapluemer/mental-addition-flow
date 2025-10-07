@@ -46,12 +46,19 @@ export async function markExerciseSolved(
     userId,
     inputValue,
     mode,
-  }: { userId: number; inputValue: string; mode: ExerciseMode },
+    keystrokeCount,
+  }: {
+    userId: number;
+    inputValue: string;
+    mode: ExerciseMode;
+    keystrokeCount?: number;
+  },
 ) {
   const solvedAt = Date.now();
   await db.exercises.update(exerciseId, {
     solvedAt,
     wasCorrect: true,
+    keystrokeCount,
   });
   await logEvent({
     userId,
@@ -60,6 +67,7 @@ export async function markExerciseSolved(
     payload: {
       mode,
       inputValue,
+      keystrokeCount,
     },
     timestamp: solvedAt,
   });

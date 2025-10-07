@@ -20,6 +20,7 @@ export interface ExerciseRecord {
   mode: ExerciseMode;
   wasCorrect: boolean;
   evaluationId?: number;
+  keystrokeCount?: number;
 }
 
 export interface EventRecord {
