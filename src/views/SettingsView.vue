@@ -83,6 +83,30 @@ watch(activeUserId, async (userId) => {
     await loadUserSettings(userId);
   }
 }, { immediate: true });
+
+async function downloadAllData() {
+  if (!activeUserId.value) return;
+
+  const data = {
+    exportedAt: new Date().toISOString(),
+    user: await db.users.get(activeUserId.value),
+    settings: await db.userSettings.get({ userId: activeUserId.value }),
+    exercises: await db.exercises.where({ userId: activeUserId.value }).toArray(),
+    events: await db.events.where({ userId: activeUserId.value }).toArray(),
+    evaluations: await db.evaluations.where({ userId: activeUserId.value }).toArray(),
+  };
+
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `mental-addition-data-${data.user?.name}-${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 </script>
 
 <template>
@@ -119,6 +143,27 @@ watch(activeUserId, async (userId) => {
               </p>
             </div>
           </label>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="activeUserId"
+      class="card border border-base-300 bg-base-100 shadow"
+    >
+      <div class="card-body">
+        <h2 class="card-title text-lg">Data Export</h2>
+        <p class="text-sm text-base-content/60">
+          Download all your data including exercises, events, and evaluations as JSON
+        </p>
+        <div class="card-actions justify-end">
+          <button
+            type="button"
+            class="btn btn-primary"
+            @click="downloadAllData"
+          >
+            Download Data
+          </button>
         </div>
       </div>
     </div>
