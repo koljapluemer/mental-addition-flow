@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useActiveUser } from "@/composables/useActiveUser";
+import { useUserSettings } from "@/composables/useUserSettings";
 import {
   createExerciseRecord,
   markExerciseSolved,
@@ -19,6 +20,11 @@ import { logEvaluationPrompt, saveEvaluation } from "@/db/evaluations";
 import Dexie from "dexie";
 
 const { activeUserId, activeUserName } = useActiveUser();
+const {
+  graduallyIncreaseDifficulty,
+  progressiveDifficultyActivatedAt,
+  loadUserSettings,
+} = useUserSettings();
 
 const mode = ref<ExerciseMode>("trial");
 const inputValue = ref("");
@@ -74,7 +80,26 @@ async function startNewExercise(forceMode?: ExerciseMode) {
 
   isGeneratingExercise.value = true;
   try {
-    const operands = generateExerciseOperands();
+    let operands;
+    if (graduallyIncreaseDifficulty.value && progressiveDifficultyActivatedAt.value) {
+      // Get count of solved exercises since progressive difficulty was activated
+      const solvedCount = await db.exercises
+        .where({ userId: activeUserId.value })
+        .and(
+          (ex) =>
+            ex.wasCorrect === true &&
+            ex.displayedAt >= (progressiveDifficultyActivatedAt.value ?? 0),
+        )
+        .count();
+
+      operands = generateExerciseOperands({
+        solvedCount,
+        maxDigits: 4,
+      });
+    } else {
+      operands = generateExerciseOperands();
+    }
+
     const exercise = await createExerciseRecord({
       userId: activeUserId.value,
       operandA: operands.operandA,
@@ -434,6 +459,7 @@ watch(
 
     if (userId !== previous) {
       resetState();
+      await loadUserSettings(userId);
       await startNewExercise();
     }
   },

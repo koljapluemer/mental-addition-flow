@@ -48,11 +48,20 @@ export interface EvaluationRecord {
   createdAt: number;
 }
 
+export interface UserSettingsRecord {
+  id?: number;
+  userId: number;
+  graduallyIncreaseDifficulty: boolean;
+  progressiveDifficultyActivatedAt?: number;
+  updatedAt: number;
+}
+
 class AppDatabase extends Dexie {
   users!: Table<UserRecord, number>;
   exercises!: Table<ExerciseRecord, number>;
   events!: Table<EventRecord, number>;
   evaluations!: Table<EvaluationRecord, number>;
+  userSettings!: Table<UserSettingsRecord, number>;
 
   constructor() {
     super("mentalAdditionFlow");
@@ -61,6 +70,13 @@ class AppDatabase extends Dexie {
       exercises: "++id,userId,mode,displayedAt,solvedAt,[userId+displayedAt]",
       events: "++id,userId,exerciseId,type,timestamp",
       evaluations: "++id,userId,createdAt,scope,mode",
+    });
+    this.version(3).stores({
+      users: "++id,&name,lastActiveAt",
+      exercises: "++id,userId,mode,displayedAt,solvedAt,[userId+displayedAt]",
+      events: "++id,userId,exerciseId,type,timestamp",
+      evaluations: "++id,userId,createdAt,scope,mode",
+      userSettings: "++id,&userId,updatedAt",
     });
   }
 }

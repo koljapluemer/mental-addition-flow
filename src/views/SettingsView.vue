@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import { liveQuery } from "dexie";
 import { useRouter, useRoute } from "vue-router";
 import { db, type UserRecord } from "@/db";
 import { useActiveUser } from "@/composables/useActiveUser";
+import { useUserSettings } from "@/composables/useUserSettings";
 
 const router = useRouter();
 const route = useRoute();
@@ -13,6 +14,11 @@ const isSubmitting = ref(false);
 const errorMessage = ref("");
 
 const { setActiveUser, createUser, activeUserId } = useActiveUser();
+const {
+  graduallyIncreaseDifficulty,
+  loadUserSettings,
+  updateGraduallyIncreaseDifficulty,
+} = useUserSettings();
 
 let subscription: { unsubscribe: () => void } | null = null;
 
@@ -65,6 +71,18 @@ async function handleCreateUser() {
     isSubmitting.value = false;
   }
 }
+
+async function handleToggleDifficulty(event: Event) {
+  if (!activeUserId.value) return;
+  const target = event.target as HTMLInputElement;
+  await updateGraduallyIncreaseDifficulty(activeUserId.value, target.checked);
+}
+
+watch(activeUserId, async (userId) => {
+  if (userId) {
+    await loadUserSettings(userId);
+  }
+}, { immediate: true });
 </script>
 
 <template>
@@ -76,6 +94,34 @@ async function handleCreateUser() {
         add a new one to continue.
       </p>
     </header>
+
+    <div
+      v-if="activeUserId"
+      class="card border border-base-300 bg-base-100 shadow"
+    >
+      <div class="card-body">
+        <h2 class="card-title text-lg">Settings</h2>
+        <div class="form-control">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input
+              type="checkbox"
+              class="toggle toggle-primary"
+              :checked="graduallyIncreaseDifficulty"
+              @change="handleToggleDifficulty"
+            />
+            <div class="space-y-1">
+              <span class="label-text font-semibold"
+                >Gradually increase difficulty</span
+              >
+              <p class="text-sm text-base-content/60">
+                Start with single digit addition and progressively increase
+                complexity every 3 exercises
+              </p>
+            </div>
+          </label>
+        </div>
+      </div>
+    </div>
 
     <div v-if="users.length" class="grid gap-4 md:grid-cols-2">
       <article
