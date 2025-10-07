@@ -58,9 +58,6 @@ const canInteract = computed(
     !!currentExercise.value,
 );
 
-const promptLabel = computed(() => {
-  return `How much mental effort did you invest in ${evaluationScope.value}?`;
-});
 
 function resetState() {
   inputValue.value = "";
@@ -603,7 +600,13 @@ const inputPlaceholder = computed(() =>
         <p class="text-xs font-semibold uppercase tracking-wide text-primary">
           Paas Cognitive Load Scale
         </p>
-        <h3 class="text-2xl font-bold leading-tight">{{ promptLabel }}</h3>
+        <h3 class="text-2xl font-bold leading-tight">
+          How much mental effort did you invest in
+          <span class="rounded bg-warning/30 px-2 py-1">{{
+            evaluationScope
+          }}</span
+          >?
+        </h3>
         <p class="text-sm text-base-content/70">
           Select one response that best reflects your effort. Use the full scale.
         </p>
