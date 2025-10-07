@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { db, type UserSettingsRecord } from "@/db";
+import { db } from "@/db";
 
 const graduallyIncreaseDifficulty = ref(false);
 const progressiveDifficultyActivatedAt = ref<number | undefined>(undefined);

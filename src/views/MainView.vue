@@ -61,8 +61,6 @@ const promptLabel = computed(() => {
   return `How much mental effort did you invest in ${evaluationScope.value}?`;
 });
 
-const canSubmitEvaluation = computed(() => selectedEvaluationRating.value !== null);
-
 function resetState() {
   inputValue.value = "";
   currentExercise.value = null;
@@ -323,14 +321,14 @@ async function skipEvaluation() {
   await startNewExercise();
 }
 
-function selectEvaluationRating(rating: number) {
+async function selectEvaluationRating(rating: number) {
   if (!activeUserId.value) return;
 
   selectedEvaluationRating.value = rating;
 
   const referenceExerciseId = evaluationExerciseIds.value[0] ?? currentExercise.value?.id;
 
-  void logEvent({
+  await logEvent({
     userId: activeUserId.value,
     type: "evaluation_rating_selected",
     exerciseId: referenceExerciseId,
@@ -340,11 +338,21 @@ function selectEvaluationRating(rating: number) {
       exerciseIds: [...evaluationExerciseIds.value],
     },
   });
+
+  // Immediately submit the evaluation
+  await submitEvaluation(rating);
 }
 
-async function confirmEvaluation() {
-  if (selectedEvaluationRating.value === null) return;
-  await submitEvaluation(selectedEvaluationRating.value);
+function handleEvaluationKeydown(event: KeyboardEvent) {
+  if (!evaluationVisible.value) return;
+
+  const key = event.key;
+  const rating = parseInt(key, 10);
+
+  if (rating >= 1 && rating <= 9) {
+    event.preventDefault();
+    void selectEvaluationRating(rating);
+  }
 }
 
 async function applyMode(nextMode: ExerciseMode) {
@@ -480,12 +488,14 @@ onMounted(async () => {
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("focus", handleWindowFocus);
   window.addEventListener("blur", handleWindowBlur);
+  window.addEventListener("keydown", handleEvaluationKeydown);
 });
 
 onUnmounted(() => {
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   window.removeEventListener("focus", handleWindowFocus);
   window.removeEventListener("blur", handleWindowBlur);
+  window.removeEventListener("keydown", handleEvaluationKeydown);
 });
 
 const exerciseDisplay = computed(() => {
@@ -627,14 +637,6 @@ const inputPlaceholder = computed(() =>
       <footer class="modal-action justify-between">
         <button type="button" class="btn btn-ghost" @click="skipEvaluation">
           Skip
-        </button>
-        <button
-          type="button"
-          class="btn btn-primary"
-          :disabled="!canSubmitEvaluation"
-          @click="confirmEvaluation"
-        >
-          Submit rating
         </button>
       </footer>
     </div>
