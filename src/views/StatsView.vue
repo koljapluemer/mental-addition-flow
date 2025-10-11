@@ -47,8 +47,12 @@ function detectOutliersIQR(values: number[], sensitivity: number = 1.5): Set<num
   const q3Index = Math.floor(sorted.length * 0.75);
   const q1 = sorted[q1Index];
   const q3 = sorted[q3Index];
-  const iqr = q3 - q1;
 
+  if (q1 === undefined || q3 === undefined) {
+    return new Set();
+  }
+
+  const iqr = q3 - q1;
   const lowerBound = q1 - sensitivity * iqr;
   const upperBound = q3 + sensitivity * iqr;
 
