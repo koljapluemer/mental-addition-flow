@@ -107,6 +107,134 @@ async function downloadAllData() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+function escapeCSV(value: any): string {
+  if (value === null || value === undefined) return "";
+  const str = String(value);
+  if (str.includes('"') || str.includes(",") || str.includes("\n")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+async function downloadExercisesCSV() {
+  if (!activeUserId.value) return;
+
+  const user = await db.users.get(activeUserId.value);
+  const exercises = await db.exercises
+    .where({ userId: activeUserId.value })
+    .toArray();
+
+  const headers = [
+    "id",
+    "userId",
+    "operandA",
+    "operandB",
+    "answer",
+    "displayedAt",
+    "displayedAt_ISO",
+    "solvedAt",
+    "solvedAt_ISO",
+    "duration_ms",
+    "mode",
+    "evaluationId",
+    "keystrokeCount",
+    "idealKeystrokeCount",
+    "isIdealKeystrokes",
+  ];
+
+  const rows = exercises.map((ex) => {
+    const duration = ex.solvedAt && ex.displayedAt
+      ? ex.solvedAt - ex.displayedAt
+      : null;
+
+    const idealKeystrokeCount = String(ex.answer).length;
+    const isIdealKeystrokes = ex.keystrokeCount !== undefined
+      ? ex.keystrokeCount === idealKeystrokeCount
+      : "";
+
+    return [
+      ex.id,
+      ex.userId,
+      ex.operandA,
+      ex.operandB,
+      ex.answer,
+      ex.displayedAt,
+      new Date(ex.displayedAt).toISOString(),
+      ex.solvedAt ?? "",
+      ex.solvedAt ? new Date(ex.solvedAt).toISOString() : "",
+      duration ?? "",
+      ex.mode,
+      ex.evaluationId ?? "",
+      ex.keystrokeCount ?? "",
+      idealKeystrokeCount,
+      isIdealKeystrokes,
+    ];
+  });
+
+  const csv = [
+    headers.map(escapeCSV).join(","),
+    ...rows.map(row => row.map(escapeCSV).join(",")),
+  ].join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `exercises-${user?.name}-${Date.now()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function downloadEvaluationsCSV() {
+  if (!activeUserId.value) return;
+
+  const user = await db.users.get(activeUserId.value);
+  const evaluations = await db.evaluations
+    .where({ userId: activeUserId.value })
+    .toArray();
+
+  const headers = [
+    "id",
+    "userId",
+    "scope",
+    "rating",
+    "exerciseIds",
+    "mode",
+    "createdAt",
+    "createdAt_ISO",
+  ];
+
+  const rows = evaluations.map((ev) => {
+    return [
+      ev.id,
+      ev.userId,
+      ev.scope,
+      ev.rating,
+      ev.exerciseIds.join(";"),
+      ev.mode,
+      ev.createdAt,
+      new Date(ev.createdAt).toISOString(),
+    ];
+  });
+
+  const csv = [
+    headers.map(escapeCSV).join(","),
+    ...rows.map(row => row.map(escapeCSV).join(",")),
+  ].join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `evaluations-${user?.name}-${Date.now()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 </script>
 
 <template>
@@ -153,17 +281,43 @@ async function downloadAllData() {
     >
       <div class="card-body">
         <h2 class="card-title text-lg">Data Export</h2>
-        <p class="text-sm text-base-content/60">
-          Download all your data including exercises, events, and evaluations as JSON
-        </p>
-        <div class="card-actions justify-end">
-          <button
-            type="button"
-            class="btn btn-primary"
-            @click="downloadAllData"
-          >
-            Download Data
-          </button>
+        <div class="space-y-4">
+          <div>
+            <h3 class="font-semibold mb-2">CSV Exports</h3>
+            <p class="text-sm text-base-content/60 mb-3">
+              Export your data as CSV files for analysis in spreadsheet applications
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                @click="downloadExercisesCSV"
+              >
+                Export Exercises CSV
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                @click="downloadEvaluationsCSV"
+              >
+                Export CL Ratings CSV
+              </button>
+            </div>
+          </div>
+          <div class="divider"></div>
+          <div>
+            <h3 class="font-semibold mb-2">Complete Data Export</h3>
+            <p class="text-sm text-base-content/60 mb-3">
+              Download all your data including exercises, events, and evaluations as JSON
+            </p>
+            <button
+              type="button"
+              class="btn btn-primary btn-sm"
+              @click="downloadAllData"
+            >
+              Download JSON Data
+            </button>
+          </div>
         </div>
       </div>
     </div>
