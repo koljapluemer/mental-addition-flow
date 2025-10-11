@@ -88,6 +88,31 @@ onUnmounted(() => {
   subscription?.unsubscribe();
 });
 
+const exerciseRatingMap = computed(() => {
+  const ratingMap = new Map<number, number[]>();
+
+  // Build map of exerciseId -> array of ratings
+  allEntries.value.forEach(entry => {
+    if (entry.type === "evaluation" && entry.evaluation) {
+      entry.evaluation.exerciseIds.forEach(exerciseId => {
+        if (!ratingMap.has(exerciseId)) {
+          ratingMap.set(exerciseId, []);
+        }
+        ratingMap.get(exerciseId)!.push(entry.evaluation!.rating);
+      });
+    }
+  });
+
+  // Convert to average ratings
+  const avgMap = new Map<number, number>();
+  ratingMap.forEach((ratings, exerciseId) => {
+    const avg = ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
+    avgMap.set(exerciseId, avg);
+  });
+
+  return avgMap;
+});
+
 const filteredEntries = computed(() => {
   return allEntries.value.filter((entry) => {
     // Filter by mode
@@ -137,6 +162,41 @@ function getKeystrokeEfficiency(exercise: ExerciseRecord): "perfect" | "good" | 
   if (excess <= 2) return "good";
   return "poor";
 }
+
+function countTotalDigits(operandA: number, operandB: number): number {
+  return String(operandA).length + String(operandB).length;
+}
+
+function countZeros(operandA: number, operandB: number): number {
+  const strA = String(operandA);
+  const strB = String(operandB);
+  const zeroCount = (strA.match(/0/g) || []).length + (strB.match(/0/g) || []).length;
+  return -zeroCount;
+}
+
+function countCarryovers(operandA: number, operandB: number): number {
+  const strA = String(operandA).split('').reverse();
+  const strB = String(operandB).split('').reverse();
+  const maxLen = Math.max(strA.length, strB.length);
+
+  let carryovers = 0;
+  let carry = 0;
+
+  for (let i = 0; i < maxLen; i++) {
+    const digitA = parseInt(strA[i] || '0');
+    const digitB = parseInt(strB[i] || '0');
+    const sum = digitA + digitB + carry;
+
+    if (sum >= 10) {
+      carryovers++;
+      carry = 1;
+    } else {
+      carry = 0;
+    }
+  }
+
+  return carryovers;
+}
 </script>
 
 <template>
@@ -182,6 +242,10 @@ function getKeystrokeEfficiency(exercise: ExerciseRecord): "perfect" | "good" | 
             <th>Mode</th>
             <th>Duration</th>
             <th>Keystrokes</th>
+            <th>Total Digits</th>
+            <th>Zeros</th>
+            <th>Carryovers</th>
+            <th>Avg CL Rating</th>
           </tr>
         </thead>
         <tbody>
@@ -270,6 +334,30 @@ function getKeystrokeEfficiency(exercise: ExerciseRecord): "perfect" | "good" | 
                 ></div>
                 <span>{{ entry.exercise.keystrokeCount }}</span>
               </div>
+              <span v-else class="text-base-content/40">—</span>
+            </td>
+            <td>
+              <span v-if="entry.type === 'exercise' && entry.exercise">
+                {{ countTotalDigits(entry.exercise.operandA, entry.exercise.operandB) }}
+              </span>
+              <span v-else class="text-base-content/40">—</span>
+            </td>
+            <td>
+              <span v-if="entry.type === 'exercise' && entry.exercise">
+                {{ countZeros(entry.exercise.operandA, entry.exercise.operandB) }}
+              </span>
+              <span v-else class="text-base-content/40">—</span>
+            </td>
+            <td>
+              <span v-if="entry.type === 'exercise' && entry.exercise">
+                {{ countCarryovers(entry.exercise.operandA, entry.exercise.operandB) }}
+              </span>
+              <span v-else class="text-base-content/40">—</span>
+            </td>
+            <td>
+              <span v-if="entry.type === 'exercise' && entry.exercise && entry.exercise.id">
+                {{ exerciseRatingMap.get(entry.exercise.id)?.toFixed(1) ?? '—' }}
+              </span>
               <span v-else class="text-base-content/40">—</span>
             </td>
           </tr>

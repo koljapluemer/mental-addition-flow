@@ -117,6 +117,41 @@ function escapeCSV(value: any): string {
   return str;
 }
 
+function countTotalDigits(operandA: number, operandB: number): number {
+  return String(operandA).length + String(operandB).length;
+}
+
+function countZeros(operandA: number, operandB: number): number {
+  const strA = String(operandA);
+  const strB = String(operandB);
+  const zeroCount = (strA.match(/0/g) || []).length + (strB.match(/0/g) || []).length;
+  return -zeroCount;
+}
+
+function countCarryovers(operandA: number, operandB: number): number {
+  const strA = String(operandA).split('').reverse();
+  const strB = String(operandB).split('').reverse();
+  const maxLen = Math.max(strA.length, strB.length);
+
+  let carryovers = 0;
+  let carry = 0;
+
+  for (let i = 0; i < maxLen; i++) {
+    const digitA = parseInt(strA[i] || '0');
+    const digitB = parseInt(strB[i] || '0');
+    const sum = digitA + digitB + carry;
+
+    if (sum >= 10) {
+      carryovers++;
+      carry = 1;
+    } else {
+      carry = 0;
+    }
+  }
+
+  return carryovers;
+}
+
 async function downloadExercisesCSV() {
   if (!activeUserId.value) return;
 
@@ -124,6 +159,27 @@ async function downloadExercisesCSV() {
   const exercises = await db.exercises
     .where({ userId: activeUserId.value })
     .toArray();
+
+  // Load evaluations and build rating map
+  const evaluations = await db.evaluations
+    .where({ userId: activeUserId.value })
+    .toArray();
+
+  const ratingMap = new Map<number, number[]>();
+  evaluations.forEach(evaluation => {
+    evaluation.exerciseIds.forEach(exerciseId => {
+      if (!ratingMap.has(exerciseId)) {
+        ratingMap.set(exerciseId, []);
+      }
+      ratingMap.get(exerciseId)!.push(evaluation.rating);
+    });
+  });
+
+  const avgRatingMap = new Map<number, number>();
+  ratingMap.forEach((ratings, exerciseId) => {
+    const avg = ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
+    avgRatingMap.set(exerciseId, avg);
+  });
 
   const headers = [
     "id",
@@ -141,6 +197,10 @@ async function downloadExercisesCSV() {
     "keystrokeCount",
     "idealKeystrokeCount",
     "isIdealKeystrokes",
+    "totalDigits",
+    "zeroCount",
+    "carryoverCount",
+    "avgCLRating",
   ];
 
   const rows = exercises.map((ex) => {
@@ -152,6 +212,11 @@ async function downloadExercisesCSV() {
     const isIdealKeystrokes = ex.keystrokeCount !== undefined
       ? ex.keystrokeCount === idealKeystrokeCount
       : "";
+
+    const totalDigits = countTotalDigits(ex.operandA, ex.operandB);
+    const zeroCount = countZeros(ex.operandA, ex.operandB);
+    const carryoverCount = countCarryovers(ex.operandA, ex.operandB);
+    const avgRating = ex.id ? avgRatingMap.get(ex.id) ?? "" : "";
 
     return [
       ex.id,
@@ -169,6 +234,10 @@ async function downloadExercisesCSV() {
       ex.keystrokeCount ?? "",
       idealKeystrokeCount,
       isIdealKeystrokes,
+      totalDigits,
+      zeroCount,
+      carryoverCount,
+      avgRating !== "" ? avgRating.toFixed(1) : "",
     ];
   });
 
