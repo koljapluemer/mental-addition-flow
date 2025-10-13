@@ -5,6 +5,7 @@ import { useOutlierDetection, type DataPoint } from '@/composables/useOutlierDet
 import { useCorrelationStats } from '@/composables/useCorrelationStats';
 import CorrelationScatterPlot from './CorrelationScatterPlot.vue';
 import BucketedSuccessRateChart from './BucketedSuccessRateChart.vue';
+import BoxPlotChart from './BoxPlotChart.vue';
 
 interface Props {
   exercises: ExerciseRecord[];
@@ -127,6 +128,44 @@ const timeDataPoints = computed<DataPoint[]>(() => {
   return applyOutlierDetection(points, outlierSensitivity.value, true);
 });
 
+// Correctness vs Solve Time data points
+const correctnessTimeDataPoints = computed<DataPoint[]>(() => {
+  const points: DataPoint[] = [];
+
+  props.exercises.forEach(ex => {
+    if (!ex.id || !ex.solvedAt || ex.keystrokeCount === undefined) return;
+    if (props.modeFilter !== 'all' && ex.mode !== props.modeFilter) return;
+
+    const duration = (ex.solvedAt - ex.displayedAt) / 1000;
+    if (duration < 0.5 || duration > 120) return;
+
+    const optimal = ex.answer.toString().length;
+    const efficiency = (ex.keystrokeCount / optimal) * 100;
+    if (efficiency < 100 || efficiency > 500) return;
+
+    // Binary outcome: 1 = correct, 0 = incorrect
+    const isCorrect = efficiency === 100 ? 1 : 0;
+
+    points.push({
+      x: isCorrect,
+      y: duration,
+      isOutlier: false,
+    });
+  });
+
+  // Only detect outliers on Y-axis (time) for binary X data
+  if (points.length >= 4) {
+    const yValues = points.map(p => p.y);
+    const yOutliers = detectOutliersIQR(yValues, outlierSensitivity.value);
+
+    points.forEach((point, idx) => {
+      point.isOutlier = yOutliers.has(idx);
+    });
+  }
+
+  return points;
+});
+
 // Bucketed success rate by CL rating
 const correctnessBuckets = computed<BucketData[]>(() => {
   const buckets: Map<number, { correct: number; total: number }> = new Map();
@@ -185,47 +224,10 @@ const timeOutlierCount = computed(() => timeDataPoints.value.filter(p => p.isOut
 </script>
 
 <template>
-  <div v-if="correctnessDataPoints.length > 0" class="grid gap-6 md:grid-cols-2">
+  <div v-if="correctnessDataPoints.length > 0" class="grid gap-6 md:grid-cols-3">
     <!-- Correctness -->
     <div class="space-y-4">
-      <div class="flex flex-col gap-2">
-        <h2 class="text-xl font-bold">Correctness</h2>
-        <div v-if="correctnessCorrelation !== null" class="space-y-2">
-          <div class="stats stats-vertical shadow lg:stats-horizontal">
-            <div class="stat p-3">
-              <div class="stat-title text-xs">Point-Biserial r (Filtered)</div>
-              <div class="stat-value text-xl">
-                {{ correctnessCorrelation.toFixed(3) }}
-              </div>
-              <div class="stat-desc text-xs">
-                {{ getCorrelationStrength(correctnessCorrelation) }}
-              </div>
-            </div>
-            <div class="stat p-3">
-              <div class="stat-title text-xs">Sample Size</div>
-              <div class="stat-value text-xl">
-                {{ filteredCorrectnessPoints.length }}
-              </div>
-              <div class="stat-desc text-xs">data points</div>
-            </div>
-          </div>
-          <div
-            v-if="correctnessOutlierCount > 0"
-            class="text-sm text-base-content/70"
-          >
-            <div class="flex gap-4">
-              <span
-                >With all data:
-                <strong>{{ correctnessCorrelationWithAll?.toFixed(3) ?? 'N/A' }}</strong></span
-              >
-              <span class="text-warning"
-                >{{ correctnessOutlierCount }} outlier{{ correctnessOutlierCount > 1 ? 's' : '' }}
-                detected</span
-              >
-            </div>
-          </div>
-        </div>
-      </div>
+      <h2 class="text-xl font-bold">Correctness</h2>
       <div class="card border border-base-300 bg-base-100 shadow">
         <div class="card-body">
           <BucketedSuccessRateChart
@@ -241,47 +243,46 @@ const timeOutlierCount = computed(() => timeDataPoints.value.filter(p => p.isOut
           </div>
         </div>
       </div>
+      <div v-if="correctnessCorrelation !== null" class="space-y-2">
+        <div class="stats stats-vertical shadow lg:stats-horizontal w-full">
+          <div class="stat p-3">
+            <div class="stat-title text-xs">Point-Biserial r (Filtered)</div>
+            <div class="stat-value text-xl">
+              {{ correctnessCorrelation.toFixed(3) }}
+            </div>
+            <div class="stat-desc text-xs">
+              {{ getCorrelationStrength(correctnessCorrelation) }}
+            </div>
+          </div>
+          <div class="stat p-3">
+            <div class="stat-title text-xs">Sample Size</div>
+            <div class="stat-value text-xl">
+              {{ filteredCorrectnessPoints.length }}
+            </div>
+            <div class="stat-desc text-xs">data points</div>
+          </div>
+        </div>
+        <div
+          v-if="correctnessOutlierCount > 0"
+          class="text-sm text-base-content/70"
+        >
+          <div class="flex gap-4">
+            <span
+              >With all data:
+              <strong>{{ correctnessCorrelationWithAll?.toFixed(3) ?? 'N/A' }}</strong></span
+            >
+            <span class="text-warning"
+              >{{ correctnessOutlierCount }} outlier{{ correctnessOutlierCount > 1 ? 's' : '' }}
+              detected</span
+            >
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Solve Time -->
     <div class="space-y-4">
-      <div class="flex flex-col gap-2">
-        <h2 class="text-xl font-bold">Solve Time</h2>
-        <div v-if="timeCorrelation !== null" class="space-y-2">
-          <div class="stats stats-vertical shadow lg:stats-horizontal">
-            <div class="stat p-3">
-              <div class="stat-title text-xs">Correlation (Filtered)</div>
-              <div class="stat-value text-xl">
-                {{ timeCorrelation.toFixed(3) }}
-              </div>
-              <div class="stat-desc text-xs">
-                {{ getCorrelationStrength(timeCorrelation) }}
-              </div>
-            </div>
-            <div class="stat p-3">
-              <div class="stat-title text-xs">Sample Size</div>
-              <div class="stat-value text-xl">
-                {{ filteredTimePoints.length }}
-              </div>
-              <div class="stat-desc text-xs">data points</div>
-            </div>
-          </div>
-          <div
-            v-if="timeOutlierCount > 0"
-            class="text-sm text-base-content/70"
-          >
-            <div class="flex gap-4">
-              <span
-                >With all data:
-                <strong>{{ timeCorrelationWithAll?.toFixed(3) ?? 'N/A' }}</strong></span
-              >
-              <span class="text-warning"
-                >{{ timeOutlierCount }} outlier{{ timeOutlierCount > 1 ? 's' : '' }} detected</span
-              >
-            </div>
-          </div>
-        </div>
-      </div>
+      <h2 class="text-xl font-bold">Solve Time</h2>
       <div class="card border border-base-300 bg-base-100 shadow">
         <div class="card-body">
           <CorrelationScatterPlot
@@ -298,6 +299,59 @@ const timeOutlierCount = computed(() => timeDataPoints.value.filter(p => p.isOut
             :tooltip-formatter="(x, y) => `Rating: ${y}, Time: ${x.toFixed(2)}s`"
           />
         </div>
+      </div>
+      <div v-if="timeCorrelation !== null" class="space-y-2">
+        <div class="stats stats-vertical shadow lg:stats-horizontal w-full">
+          <div class="stat p-3">
+            <div class="stat-title text-xs">Correlation (Filtered)</div>
+            <div class="stat-value text-xl">
+              {{ timeCorrelation.toFixed(3) }}
+            </div>
+            <div class="stat-desc text-xs">
+              {{ getCorrelationStrength(timeCorrelation) }}
+            </div>
+          </div>
+          <div class="stat p-3">
+            <div class="stat-title text-xs">Sample Size</div>
+            <div class="stat-value text-xl">
+              {{ filteredTimePoints.length }}
+            </div>
+            <div class="stat-desc text-xs">data points</div>
+          </div>
+        </div>
+        <div
+          v-if="timeOutlierCount > 0"
+          class="text-sm text-base-content/70"
+        >
+          <div class="flex gap-4">
+            <span
+              >With all data:
+              <strong>{{ timeCorrelationWithAll?.toFixed(3) ?? 'N/A' }}</strong></span
+            >
+            <span class="text-warning"
+              >{{ timeOutlierCount }} outlier{{ timeOutlierCount > 1 ? 's' : '' }} detected</span
+            >
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Correctness vs Time Box Plot -->
+    <div v-if="correctnessTimeDataPoints.length > 0" class="space-y-4">
+      <h2 class="text-xl font-bold">Time by Correctness</h2>
+      <div class="card border border-base-300 bg-base-100 shadow">
+        <div class="card-body">
+          <BoxPlotChart
+            :points="correctnessTimeDataPoints"
+            title="Solve Time Distribution by Correctness"
+            x-axis-label="Correctness"
+            y-axis-label="Solve Time (seconds)"
+            height="400px"
+          />
+        </div>
+      </div>
+      <div class="text-sm text-base-content/60">
+        Distribution of solve times for correct vs incorrect answers
       </div>
     </div>
   </div>

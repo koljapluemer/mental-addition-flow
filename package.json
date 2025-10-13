@@ -10,6 +10,7 @@
     "lint": "eslint . --ext .ts,.tsx,.vue --max-warnings=0"
   },
   "dependencies": {
+    "@sgratzl/chartjs-chart-boxplot": "^4.4.5",
     "@tailwindcss/vite": "^4.1.14",
     "chart.js": "^4.5.0",
     "dexie": "^4.2.0",
