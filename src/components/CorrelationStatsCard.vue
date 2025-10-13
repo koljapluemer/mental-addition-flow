@@ -3,15 +3,11 @@ interface Props {
   correlation: number | null;
   r2?: number | null;
   outlierCount?: number;
-  showOutliers?: boolean;
-  excludeOutliers?: boolean;
   statLabel?: string;
   description?: string;
 }
 
 withDefaults(defineProps<Props>(), {
-  showOutliers: true,
-  excludeOutliers: false,
   statLabel: 'Correlation',
 });
 
@@ -45,10 +41,10 @@ function getCorrelationStrength(corr: number | null): string {
         </div>
       </div>
       <div
-        v-if="showOutliers && outlierCount && outlierCount > 0 && !excludeOutliers"
+        v-if="outlierCount && outlierCount > 0"
         class="text-sm text-base-content/70 mt-2"
       >
-        <span class="text-warning">{{ outlierCount }} outlier(s)</span>
+        <span class="text-warning">{{ outlierCount }} outlier(s) excluded</span>
       </div>
     </div>
   </div>

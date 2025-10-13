@@ -4,6 +4,7 @@ import type { ExerciseRecord, EvaluationRecord, ExerciseMode } from '@/db';
 import { useOutlierDetection, type DataPoint } from '@/composables/useOutlierDetection';
 import { useCorrelationStats } from '@/composables/useCorrelationStats';
 import CorrelationScatterPlot from './CorrelationScatterPlot.vue';
+import BucketedSuccessRateChart from './BucketedSuccessRateChart.vue';
 
 interface Props {
   exercises: ExerciseRecord[];
@@ -13,16 +14,21 @@ interface Props {
 
 const props = defineProps<Props>();
 
-const { applyOutlierDetection } = useOutlierDetection();
+const { applyOutlierDetection, detectOutliersIQR } = useOutlierDetection();
 const { calculateCorrelation, getCorrelationStrength } = useCorrelationStats();
 
+interface BucketData {
+  bucket: string;
+  successRate: number;
+  totalCount: number;
+  correctCount: number;
+}
+
 // State
-const detectOutliers = ref(true);
-const excludeOutliers = ref(false);
 const outlierSensitivity = ref(1.5);
 
-// CL vs Keystroke Efficiency data points
-const efficiencyDataPoints = computed<DataPoint[]>(() => {
+// CL vs Correctness data points
+const correctnessDataPoints = computed<DataPoint[]>(() => {
   const points: DataPoint[] = [];
   const exerciseMap = new Map<number, ExerciseRecord>();
 
@@ -54,15 +60,28 @@ const efficiencyDataPoints = computed<DataPoint[]>(() => {
         continue;
       }
 
+      // Binary outcome: 1 = correct (100% efficiency), 0 = incorrect
+      const isCorrect = efficiency === 100 ? 1 : 0;
+
       points.push({
-        x: efficiency,
-        y: evaluation.rating,
+        x: evaluation.rating,
+        y: isCorrect,
         isOutlier: false,
       });
     }
   }
 
-  return applyOutlierDetection(points, outlierSensitivity.value, detectOutliers.value);
+  // Only detect outliers on X-axis (CL rating) for binary data, not Y-axis
+  if (points.length >= 4) {
+    const xValues = points.map(p => p.x);
+    const xOutliers = detectOutliersIQR(xValues, outlierSensitivity.value);
+
+    points.forEach((point, idx) => {
+      point.isOutlier = xOutliers.has(idx);
+    });
+  }
+
+  return points;
 });
 
 // CL vs Solve Time data points
@@ -105,74 +124,102 @@ const timeDataPoints = computed<DataPoint[]>(() => {
     }
   }
 
-  return applyOutlierDetection(points, outlierSensitivity.value, detectOutliers.value);
+  return applyOutlierDetection(points, outlierSensitivity.value, true);
 });
 
-// Filtered points for correlations
-const filteredEfficiencyPoints = computed(() =>
-  excludeOutliers.value
-    ? efficiencyDataPoints.value.filter(p => !p.isOutlier)
-    : efficiencyDataPoints.value
+// Bucketed success rate by CL rating
+const correctnessBuckets = computed<BucketData[]>(() => {
+  const buckets: Map<number, { correct: number; total: number }> = new Map();
+
+  // Initialize 9 buckets (1-9 CL rating)
+  for (let i = 1; i <= 9; i++) {
+    buckets.set(i, { correct: 0, total: 0 });
+  }
+
+  // Fill buckets with data (exclude outliers)
+  correctnessDataPoints.value.forEach(point => {
+    if (point.isOutlier) return;
+
+    const rating = Math.round(point.x);
+    if (rating < 1 || rating > 9) return;
+
+    const bucket = buckets.get(rating)!;
+    bucket.total++;
+    if (point.y === 1) bucket.correct++;
+  });
+
+  // Convert to array format
+  const result: BucketData[] = [];
+  for (let i = 1; i <= 9; i++) {
+    const bucket = buckets.get(i)!;
+    if (bucket.total > 0) {
+      result.push({
+        bucket: String(i),
+        successRate: (bucket.correct / bucket.total) * 100,
+        totalCount: bucket.total,
+        correctCount: bucket.correct,
+      });
+    }
+  }
+
+  return result;
+});
+
+// Filtered points for correlations (always exclude outliers)
+const filteredCorrectnessPoints = computed(() =>
+  correctnessDataPoints.value.filter(p => !p.isOutlier)
 );
 
 const filteredTimePoints = computed(() =>
-  excludeOutliers.value
-    ? timeDataPoints.value.filter(p => !p.isOutlier)
-    : timeDataPoints.value
+  timeDataPoints.value.filter(p => !p.isOutlier)
 );
 
-// Correlations
-const efficiencyCorrelation = computed(() => calculateCorrelation(filteredEfficiencyPoints.value));
-const efficiencyCorrelationWithoutOutliers = computed(() =>
-  calculateCorrelation(efficiencyDataPoints.value.filter(p => !p.isOutlier))
-);
-const efficiencyOutlierCount = computed(() => efficiencyDataPoints.value.filter(p => p.isOutlier).length);
+// Correlations (both with and without outliers)
+const correctnessCorrelation = computed(() => calculateCorrelation(filteredCorrectnessPoints.value));
+const correctnessCorrelationWithAll = computed(() => calculateCorrelation(correctnessDataPoints.value));
+const correctnessOutlierCount = computed(() => correctnessDataPoints.value.filter(p => p.isOutlier).length);
 
 const timeCorrelation = computed(() => calculateCorrelation(filteredTimePoints.value));
-const timeCorrelationWithoutOutliers = computed(() =>
-  calculateCorrelation(timeDataPoints.value.filter(p => !p.isOutlier))
-);
+const timeCorrelationWithAll = computed(() => calculateCorrelation(timeDataPoints.value));
 const timeOutlierCount = computed(() => timeDataPoints.value.filter(p => p.isOutlier).length);
 </script>
 
 <template>
-  <div v-if="efficiencyDataPoints.length > 0" class="grid gap-6 md:grid-cols-2">
-    <!-- Typing Efficiency -->
+  <div v-if="correctnessDataPoints.length > 0" class="grid gap-6 md:grid-cols-2">
+    <!-- Correctness -->
     <div class="space-y-4">
       <div class="flex flex-col gap-2">
-        <h2 class="text-xl font-bold">Typing Efficiency</h2>
-        <div v-if="efficiencyCorrelation !== null" class="space-y-2">
+        <h2 class="text-xl font-bold">Correctness</h2>
+        <div v-if="correctnessCorrelation !== null" class="space-y-2">
           <div class="stats stats-vertical shadow lg:stats-horizontal">
             <div class="stat p-3">
-              <div class="stat-title text-xs">
-                {{ excludeOutliers ? 'Correlation (Filtered)' : 'Correlation (All Data)' }}
-              </div>
+              <div class="stat-title text-xs">Point-Biserial r (Filtered)</div>
               <div class="stat-value text-xl">
-                {{ efficiencyCorrelation.toFixed(3) }}
+                {{ correctnessCorrelation.toFixed(3) }}
               </div>
               <div class="stat-desc text-xs">
-                {{ getCorrelationStrength(efficiencyCorrelation) }}
+                {{ getCorrelationStrength(correctnessCorrelation) }}
               </div>
             </div>
             <div class="stat p-3">
               <div class="stat-title text-xs">Sample Size</div>
               <div class="stat-value text-xl">
-                {{ filteredEfficiencyPoints.length }}
+                {{ filteredCorrectnessPoints.length }}
               </div>
               <div class="stat-desc text-xs">data points</div>
             </div>
           </div>
           <div
-            v-if="detectOutliers && efficiencyOutlierCount > 0 && !excludeOutliers"
+            v-if="correctnessOutlierCount > 0"
             class="text-sm text-base-content/70"
           >
             <div class="flex gap-4">
               <span
-                >Without outliers:
-                <strong>{{ efficiencyCorrelationWithoutOutliers?.toFixed(3) ?? 'N/A' }}</strong></span
+                >With all data:
+                <strong>{{ correctnessCorrelationWithAll?.toFixed(3) ?? 'N/A' }}</strong></span
               >
               <span class="text-warning"
-                >{{ efficiencyOutlierCount }} outlier{{ efficiencyOutlierCount > 1 ? 's' : '' }}
+                >{{ correctnessOutlierCount }} outlier{{ correctnessOutlierCount > 1 ? 's' : '' }}
                 detected</span
               >
             </div>
@@ -181,20 +228,17 @@ const timeOutlierCount = computed(() => timeDataPoints.value.filter(p => p.isOut
       </div>
       <div class="card border border-base-300 bg-base-100 shadow">
         <div class="card-body">
-          <CorrelationScatterPlot
-            :points="efficiencyDataPoints"
-            title="Cognitive Load vs Typing Efficiency"
-            x-axis-label="Keystroke Efficiency (%)"
-            y-axis-label="Effort Rating (1-9)"
-            :x-min="80"
-            :x-max="300"
-            :y-min="0"
-            :y-max="10"
-            :y-step-size="1"
-            :show-outliers="detectOutliers"
+          <BucketedSuccessRateChart
+            v-if="correctnessBuckets.length > 0"
+            :buckets="correctnessBuckets"
+            title="Success Rate by Cognitive Load"
+            x-axis-label="CL Rating (1-9)"
+            y-axis-label="Success Rate (%)"
             height="400px"
-            :tooltip-formatter="(x, y) => `Rating: ${y}, Efficiency: ${x.toFixed(1)}%`"
           />
+          <div v-else class="text-center text-base-content/60 py-8">
+            No bucketed data available
+          </div>
         </div>
       </div>
     </div>
@@ -206,9 +250,7 @@ const timeOutlierCount = computed(() => timeDataPoints.value.filter(p => p.isOut
         <div v-if="timeCorrelation !== null" class="space-y-2">
           <div class="stats stats-vertical shadow lg:stats-horizontal">
             <div class="stat p-3">
-              <div class="stat-title text-xs">
-                {{ excludeOutliers ? 'Correlation (Filtered)' : 'Correlation (All Data)' }}
-              </div>
+              <div class="stat-title text-xs">Correlation (Filtered)</div>
               <div class="stat-value text-xl">
                 {{ timeCorrelation.toFixed(3) }}
               </div>
@@ -225,13 +267,13 @@ const timeOutlierCount = computed(() => timeDataPoints.value.filter(p => p.isOut
             </div>
           </div>
           <div
-            v-if="detectOutliers && timeOutlierCount > 0 && !excludeOutliers"
+            v-if="timeOutlierCount > 0"
             class="text-sm text-base-content/70"
           >
             <div class="flex gap-4">
               <span
-                >Without outliers:
-                <strong>{{ timeCorrelationWithoutOutliers?.toFixed(3) ?? 'N/A' }}</strong></span
+                >With all data:
+                <strong>{{ timeCorrelationWithAll?.toFixed(3) ?? 'N/A' }}</strong></span
               >
               <span class="text-warning"
                 >{{ timeOutlierCount }} outlier{{ timeOutlierCount > 1 ? 's' : '' }} detected</span
@@ -251,7 +293,6 @@ const timeOutlierCount = computed(() => timeDataPoints.value.filter(p => p.isOut
             :y-min="0"
             :y-max="10"
             :y-step-size="1"
-            :show-outliers="detectOutliers"
             height="400px"
             normal-color="rgba(16, 185, 129, 0.5)"
             :tooltip-formatter="(x, y) => `Rating: ${y}, Time: ${x.toFixed(2)}s`"
@@ -260,17 +301,4 @@ const timeOutlierCount = computed(() => timeDataPoints.value.filter(p => p.isOut
       </div>
     </div>
   </div>
-
-  <!-- Analysis Settings (exposed as prop bindings) -->
-  <template v-if="$slots.settings">
-    <slot
-      name="settings"
-      :detect-outliers="detectOutliers"
-      :exclude-outliers="excludeOutliers"
-      :outlier-sensitivity="outlierSensitivity"
-      @update:detect-outliers="detectOutliers = $event"
-      @update:exclude-outliers="excludeOutliers = $event"
-      @update:outlier-sensitivity="outlierSensitivity = $event"
-    />
-  </template>
 </template>

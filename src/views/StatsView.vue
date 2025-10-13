@@ -29,8 +29,6 @@ const { activeUserId } = useActiveUser();
 const evaluations = ref<EvaluationRecord[]>([]);
 const exercises = ref<ExerciseRecord[]>([]);
 const modeFilter = ref<ExerciseMode | "all">("all");
-const detectOutliers = ref(true);
-const excludeOutliers = ref(false);
 const outlierSensitivity = ref(1.5);
 
 let subscription: { unsubscribe: () => void } | null = null;
@@ -113,29 +111,6 @@ onUnmounted(() => {
           </div>
 
           <div class="form-control">
-            <label class="label cursor-pointer gap-2">
-              <input
-                type="checkbox"
-                v-model="detectOutliers"
-                class="checkbox checkbox-sm"
-              />
-              <span class="label-text">Detect outliers</span>
-            </label>
-          </div>
-
-          <div class="form-control">
-            <label class="label cursor-pointer gap-2">
-              <input
-                type="checkbox"
-                v-model="excludeOutliers"
-                class="checkbox checkbox-sm"
-                :disabled="!detectOutliers"
-              />
-              <span class="label-text">Exclude outliers from correlation</span>
-            </label>
-          </div>
-
-          <div class="form-control">
             <label class="label">
               <span class="label-text font-semibold">Outlier sensitivity</span>
             </label>
@@ -148,7 +123,6 @@ onUnmounted(() => {
                 step="0.1"
                 class="range range-sm range-primary"
                 style="width: 150px"
-                :disabled="!detectOutliers"
               />
               <span class="text-sm font-mono">{{ outlierSensitivity.toFixed(1) }}×</span>
             </div>

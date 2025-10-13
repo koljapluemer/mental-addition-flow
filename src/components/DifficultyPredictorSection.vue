@@ -33,8 +33,6 @@ const difficultyWeights = ref<DifficultyWeights>({
   carryovers: 2.5,
   zeros: 0.5,
 });
-const detectOutliers = ref(true);
-const excludeOutliers = ref(false);
 const outlierSensitivity = ref(1.5);
 
 // Optimization state
@@ -69,7 +67,7 @@ const difficultyVsTime = computed<DataPoint[]>(() => {
     points.push({ x: difficulty, y: duration, isOutlier: false });
   });
 
-  return applyOutlierDetection(points, outlierSensitivity.value, detectOutliers.value);
+  return applyOutlierDetection(points, outlierSensitivity.value, true);
 });
 
 // Difficulty vs CL Rating data points
@@ -103,7 +101,7 @@ const difficultyVsRating = computed<DataPoint[]>(() => {
     points.push({ x: difficulty, y: avgRating, isOutlier: false });
   });
 
-  return applyOutlierDetection(points, outlierSensitivity.value, detectOutliers.value);
+  return applyOutlierDetection(points, outlierSensitivity.value, true);
 });
 
 // Difficulty vs Correctness data points
@@ -128,7 +126,18 @@ const difficultyVsCorrectness = computed<DataPoint[]>(() => {
     points.push({ x: difficulty, y: isCorrect, isOutlier: false });
   });
 
-  return applyOutlierDetection(points, outlierSensitivity.value, detectOutliers.value);
+  // Only detect outliers on X-axis (difficulty) for binary data, not Y-axis
+  if (points.length >= 4) {
+    const xValues = points.map(p => p.x);
+    const { detectOutliersIQR } = useOutlierDetection();
+    const xOutliers = detectOutliersIQR(xValues, outlierSensitivity.value);
+
+    points.forEach((point, idx) => {
+      point.isOutlier = xOutliers.has(idx);
+    });
+  }
+
+  return points;
 });
 
 // Bucketed success rate data
@@ -147,9 +156,9 @@ const difficultyBuckets = computed<BucketData[]>(() => {
     buckets.set(i, { correct: 0, total: 0 });
   }
 
-  // Fill buckets with data
+  // Fill buckets with data (exclude outliers)
   difficultyVsCorrectness.value.forEach(point => {
-    if (point.isOutlier && excludeOutliers.value) return;
+    if (point.isOutlier) return;
 
     const bucketIndex = Math.min(Math.floor(point.x / 5), 19);
     const bucket = buckets.get(bucketIndex)!;
@@ -174,23 +183,17 @@ const difficultyBuckets = computed<BucketData[]>(() => {
   return result;
 });
 
-// Filtered points for correlations
+// Filtered points for correlations (always exclude outliers)
 const filteredTimePoints = computed(() =>
-  excludeOutliers.value
-    ? difficultyVsTime.value.filter(p => !p.isOutlier)
-    : difficultyVsTime.value
+  difficultyVsTime.value.filter(p => !p.isOutlier)
 );
 
 const filteredRatingPoints = computed(() =>
-  excludeOutliers.value
-    ? difficultyVsRating.value.filter(p => !p.isOutlier)
-    : difficultyVsRating.value
+  difficultyVsRating.value.filter(p => !p.isOutlier)
 );
 
 const filteredCorrectnessPoints = computed(() =>
-  excludeOutliers.value
-    ? difficultyVsCorrectness.value.filter(p => !p.isOutlier)
-    : difficultyVsCorrectness.value
+  difficultyVsCorrectness.value.filter(p => !p.isOutlier)
 );
 
 // Correlations
@@ -237,7 +240,7 @@ async function autoOptimize() {
       props.exercises,
       props.evaluations,
       props.modeFilter,
-      detectOutliers.value,
+      true, // always detect outliers
       outlierSensitivity.value,
       (progress) => {
         optimizationProgress.value = progress;
@@ -378,48 +381,6 @@ function showOptimizationResult(result: any) {
         </svg>
         <span class="text-xs">Need at least 30 exercises for reliable optimization (current: {{ exercises.length }})</span>
       </div>
-
-      <!-- Outlier Controls -->
-      <div class="divider"></div>
-      <div class="flex flex-wrap items-end gap-6">
-        <div class="form-control">
-          <label class="label cursor-pointer gap-2">
-            <input type="checkbox" v-model="detectOutliers" class="checkbox checkbox-sm" />
-            <span class="label-text">Detect outliers</span>
-          </label>
-        </div>
-
-        <div class="form-control">
-          <label class="label cursor-pointer gap-2">
-            <input
-              type="checkbox"
-              v-model="excludeOutliers"
-              class="checkbox checkbox-sm"
-              :disabled="!detectOutliers"
-            />
-            <span class="label-text">Exclude outliers from correlation</span>
-          </label>
-        </div>
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text font-semibold">Outlier sensitivity</span>
-          </label>
-          <div class="flex items-center gap-2">
-            <input
-              type="range"
-              v-model.number="outlierSensitivity"
-              min="1.0"
-              max="3.0"
-              step="0.1"
-              class="range range-sm range-primary"
-              style="width: 150px"
-              :disabled="!detectOutliers"
-            />
-            <span class="text-sm font-mono">{{ outlierSensitivity.toFixed(1) }}×</span>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -433,8 +394,6 @@ function showOptimizationResult(result: any) {
           :correlation="timeCorr"
           :r2="timeR2"
           :outlier-count="timeOutlierCount"
-          :show-outliers="detectOutliers"
-          :exclude-outliers="excludeOutliers"
         />
       </div>
       <div class="card border border-base-300 bg-base-100 shadow">
@@ -447,7 +406,6 @@ function showOptimizationResult(result: any) {
             :x-min="0"
             :x-max="100"
             :y-min="0"
-            :show-outliers="detectOutliers"
             normal-color="rgba(59, 130, 246, 0.5)"
             :tooltip-formatter="(x, y) => `Difficulty: ${x.toFixed(1)}, Time: ${y.toFixed(2)}s`"
           />
@@ -463,8 +421,6 @@ function showOptimizationResult(result: any) {
           :correlation="ratingCorr"
           :r2="ratingR2"
           :outlier-count="ratingOutlierCount"
-          :show-outliers="detectOutliers"
-          :exclude-outliers="excludeOutliers"
         />
       </div>
       <div class="card border border-base-300 bg-base-100 shadow">
@@ -479,7 +435,6 @@ function showOptimizationResult(result: any) {
             :y-min="0"
             :y-max="10"
             :y-step-size="1"
-            :show-outliers="detectOutliers"
             normal-color="rgba(168, 85, 247, 0.5)"
             :tooltip-formatter="(x, y) => `Difficulty: ${x.toFixed(1)}, Rating: ${y.toFixed(1)}`"
           />
@@ -494,8 +449,6 @@ function showOptimizationResult(result: any) {
         <CorrelationStatsCard
           :correlation="correctnessCorr"
           :outlier-count="correctnessOutlierCount"
-          :show-outliers="detectOutliers"
-          :exclude-outliers="excludeOutliers"
           stat-label="Point-Biserial r"
           :description="`${correctnessPercent.toFixed(1)}% correct`"
         />
