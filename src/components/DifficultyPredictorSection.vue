@@ -4,6 +4,7 @@ import type { ExerciseRecord, EvaluationRecord, ExerciseMode } from '@/db';
 import { useDifficultyCalculation, type DifficultyWeights } from '@/composables/useDifficultyCalculation';
 import { useOutlierDetection, type DataPoint } from '@/composables/useOutlierDetection';
 import { useCorrelationStats } from '@/composables/useCorrelationStats';
+import { useWeightOptimization, type OptimizationProgress } from '@/composables/useWeightOptimization';
 import CorrelationScatterPlot from './CorrelationScatterPlot.vue';
 import CorrelationStatsCard from './CorrelationStatsCard.vue';
 import BucketedSuccessRateChart from './BucketedSuccessRateChart.vue';
@@ -24,6 +25,7 @@ const {
 
 const { applyOutlierDetection } = useOutlierDetection();
 const { calculateCorrelation, calculateRSquared } = useCorrelationStats();
+const { gridSearch } = useWeightOptimization();
 
 // State
 const difficultyWeights = ref<DifficultyWeights>({
@@ -34,6 +36,14 @@ const difficultyWeights = ref<DifficultyWeights>({
 const detectOutliers = ref(true);
 const excludeOutliers = ref(false);
 const outlierSensitivity = ref(1.5);
+
+// Optimization state
+const isOptimizing = ref(false);
+const optimizationProgress = ref<OptimizationProgress>({ current: 0, total: 0, percentage: 0 });
+const beforeOptimization = ref<{
+  weights: DifficultyWeights;
+  correlations: { cl: number | null; time: number | null; correctness: number | null };
+} | null>(null);
 
 // Difficulty range for normalization
 const difficultyRange = useDifficultyRange(
@@ -204,6 +214,74 @@ const correctnessPercent = computed(() => {
 function resetWeights() {
   difficultyWeights.value = { digits: 1.0, carryovers: 2.5, zeros: 0.5 };
 }
+
+// Auto-optimize weights
+async function autoOptimize() {
+  if (isOptimizing.value) return;
+
+  // Save current state
+  beforeOptimization.value = {
+    weights: { ...difficultyWeights.value },
+    correlations: {
+      cl: ratingCorr.value,
+      time: timeCorr.value,
+      correctness: correctnessCorr.value,
+    },
+  };
+
+  isOptimizing.value = true;
+  optimizationProgress.value = { current: 0, total: 0, percentage: 0 };
+
+  try {
+    const result = await gridSearch(
+      props.exercises,
+      props.evaluations,
+      props.modeFilter,
+      detectOutliers.value,
+      outlierSensitivity.value,
+      (progress) => {
+        optimizationProgress.value = progress;
+      }
+    );
+
+    // Apply optimized weights
+    difficultyWeights.value = result.weights;
+
+    // Show result summary
+    showOptimizationResult(result);
+  } catch (error) {
+    console.error('Optimization failed:', error);
+    alert('Optimization failed. Please try again.');
+  } finally {
+    isOptimizing.value = false;
+  }
+}
+
+function showOptimizationResult(result: any) {
+  const before = beforeOptimization.value;
+  if (!before) return;
+
+  const improvements = [];
+
+  if (before.correlations.cl !== null && result.correlations.cl !== null) {
+    const change = result.correlations.cl - before.correlations.cl;
+    improvements.push(`CL: ${before.correlations.cl.toFixed(3)} → ${result.correlations.cl.toFixed(3)} (${change >= 0 ? '+' : ''}${change.toFixed(3)})`);
+  }
+
+  if (before.correlations.time !== null && result.correlations.time !== null) {
+    const change = result.correlations.time - before.correlations.time;
+    improvements.push(`Time: ${before.correlations.time.toFixed(3)} → ${result.correlations.time.toFixed(3)} (${change >= 0 ? '+' : ''}${change.toFixed(3)})`);
+  }
+
+  if (before.correlations.correctness !== null && result.correlations.correctness !== null) {
+    const change = Math.abs(result.correlations.correctness) - Math.abs(before.correlations.correctness);
+    improvements.push(`Correctness: ${before.correlations.correctness.toFixed(3)} → ${result.correlations.correctness.toFixed(3)} (${change >= 0 ? '+' : ''}${change.toFixed(3)})`);
+  }
+
+  const message = `Optimization Complete!\n\nNew weights:\nDigits: ${result.weights.digits.toFixed(1)}\nCarryovers: ${result.weights.carryovers.toFixed(1)}\nZeros: ${result.weights.zeros.toFixed(1)}\n\nCorrelations:\n${improvements.join('\n')}`;
+
+  alert(message);
+}
 </script>
 
 <template>
@@ -265,9 +343,40 @@ function resetWeights() {
         </div>
       </div>
 
-      <!-- Reset Button -->
-      <div class="flex justify-end mt-2">
+      <!-- Action Buttons -->
+      <div class="flex justify-end gap-2 mt-2">
         <button @click="resetWeights" class="btn btn-ghost btn-sm">Reset to Defaults</button>
+
+        <!-- Auto-Optimize Button or Progress Bar -->
+        <button
+          v-if="!isOptimizing"
+          @click="autoOptimize"
+          class="btn btn-primary btn-sm"
+          :disabled="exercises.length < 30"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Auto-Optimize
+        </button>
+
+        <!-- Progress Bar -->
+        <div v-else class="flex items-center gap-2">
+          <progress
+            class="progress progress-primary w-32"
+            :value="optimizationProgress.percentage"
+            max="100"
+          ></progress>
+          <span class="text-xs font-mono">{{ optimizationProgress.percentage.toFixed(0) }}%</span>
+        </div>
+      </div>
+
+      <!-- Warning for insufficient data -->
+      <div v-if="exercises.length < 30" class="alert alert-warning mt-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+        </svg>
+        <span class="text-xs">Need at least 30 exercises for reliable optimization (current: {{ exercises.length }})</span>
       </div>
 
       <!-- Outlier Controls -->
