@@ -54,6 +54,11 @@ export interface UserSettingsRecord {
   graduallyIncreaseDifficulty: boolean;
   progressiveDifficultyActivatedAt?: number;
   updatedAt: number;
+  difficultyWeights?: {
+    digits: number;
+    carryovers: number;
+    zeros: number;
+  };
 }
 
 class AppDatabase extends Dexie {

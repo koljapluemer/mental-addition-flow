@@ -136,6 +136,7 @@ onUnmounted(() => {
       :exercises="exercises"
       :evaluations="evaluations"
       :mode-filter="modeFilter"
+      :active-user-id="activeUserId"
     />
 
     <!-- Cognitive Load Correlations Section -->

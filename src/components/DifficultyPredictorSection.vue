@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { ExerciseRecord, EvaluationRecord, ExerciseMode } from '@/db';
-import { useDifficultyCalculation, type DifficultyWeights } from '@/composables/useDifficultyCalculation';
+import { db } from '@/db';
+import { useDifficultyCalculation } from '@/composables/useDifficultyCalculation';
 import { useOutlierDetection, type DataPoint } from '@/composables/useOutlierDetection';
 import { useCorrelationStats } from '@/composables/useCorrelationStats';
 import { useWeightOptimization, type OptimizationProgress } from '@/composables/useWeightOptimization';
 import CorrelationScatterPlot from './CorrelationScatterPlot.vue';
 import CorrelationStatsCard from './CorrelationStatsCard.vue';
 import BucketedSuccessRateChart from './BucketedSuccessRateChart.vue';
+import type { DifficultyWeights } from '@/types/difficulty';
+import { mergeDifficultyWeights } from '@/types/difficulty';
 
 interface Props {
   exercises: ExerciseRecord[];
   evaluations: EvaluationRecord[];
   modeFilter: ExerciseMode | 'all';
+  activeUserId: number | null;
 }
 
 const props = defineProps<Props>();
@@ -28,12 +32,106 @@ const { calculateCorrelation, calculateRSquared } = useCorrelationStats();
 const { gridSearch } = useWeightOptimization();
 
 // State
-const difficultyWeights = ref<DifficultyWeights>({
-  digits: 1.0,
-  carryovers: 2.5,
-  zeros: 0.5,
-});
+const difficultyWeights = ref<DifficultyWeights>(mergeDifficultyWeights());
 const outlierSensitivity = ref(1.5);
+
+const PERSIST_DEBOUNCE_MS = 300;
+let persistTimeout: ReturnType<typeof setTimeout> | null = null;
+let isApplyingPersistedWeights = false;
+
+function clearPersistTimer() {
+  if (persistTimeout) {
+    clearTimeout(persistTimeout);
+    persistTimeout = null;
+  }
+}
+
+function roundWeight(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function toPersistableWeights(weights: DifficultyWeights): DifficultyWeights {
+  return {
+    digits: roundWeight(weights.digits),
+    carryovers: roundWeight(weights.carryovers),
+    zeros: roundWeight(weights.zeros),
+  };
+}
+
+async function loadDifficultyWeights(userId: number) {
+  isApplyingPersistedWeights = true;
+  try {
+    const settings = await db.userSettings.get({ userId });
+    const stored = settings?.difficultyWeights;
+
+    difficultyWeights.value = mergeDifficultyWeights(stored);
+    await nextTick();
+  } finally {
+    isApplyingPersistedWeights = false;
+  }
+}
+
+async function persistDifficultyWeights(userId: number, weights: DifficultyWeights) {
+  const now = Date.now();
+  const existing = await db.userSettings.get({ userId });
+  const payload = toPersistableWeights(weights);
+
+  if (existing) {
+    await db.userSettings.update(existing.id!, {
+      difficultyWeights: payload,
+      updatedAt: now,
+    });
+  } else {
+    await db.userSettings.add({
+      userId,
+      graduallyIncreaseDifficulty: false,
+      progressiveDifficultyActivatedAt: undefined,
+      difficultyWeights: payload,
+      updatedAt: now,
+    });
+  }
+}
+
+function schedulePersist(weights: DifficultyWeights) {
+  const userId = props.activeUserId;
+  if (!userId) return;
+
+  const snapshot = toPersistableWeights(weights);
+  clearPersistTimer();
+
+  persistTimeout = setTimeout(() => {
+    persistTimeout = null;
+    void persistDifficultyWeights(userId, snapshot);
+  }, PERSIST_DEBOUNCE_MS);
+}
+
+watch(
+  () => props.activeUserId,
+  (userId) => {
+    clearPersistTimer();
+    if (userId) {
+      void loadDifficultyWeights(userId);
+    } else {
+      isApplyingPersistedWeights = true;
+      difficultyWeights.value = mergeDifficultyWeights();
+      isApplyingPersistedWeights = false;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  difficultyWeights,
+  (weights) => {
+    if (!props.activeUserId || isApplyingPersistedWeights) return;
+    schedulePersist({ ...weights });
+  },
+  { deep: true }
+);
+
+onBeforeUnmount(() => {
+  clearPersistTimer();
+});
 
 // Optimization state
 const isOptimizing = ref(false);
@@ -215,7 +313,7 @@ const correctnessPercent = computed(() => {
 });
 
 function resetWeights() {
-  difficultyWeights.value = { digits: 1.0, carryovers: 2.5, zeros: 0.5 };
+  difficultyWeights.value = mergeDifficultyWeights();
 }
 
 // Auto-optimize weights

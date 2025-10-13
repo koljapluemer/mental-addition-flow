@@ -1,11 +1,6 @@
 import { computed, type Ref } from 'vue';
 import type { ExerciseRecord, ExerciseMode } from '@/db';
-
-export interface DifficultyWeights {
-  digits: number;
-  carryovers: number;
-  zeros: number;
-}
+import type { DifficultyWeights } from '@/types/difficulty';
 
 export interface DifficultyRange {
   min: number;

@@ -1,5 +1,7 @@
 import type { ExerciseRecord, EvaluationRecord, ExerciseMode } from '@/db';
-import { useDifficultyCalculation, type DifficultyWeights } from './useDifficultyCalculation';
+import type { DifficultyWeights } from '@/types/difficulty';
+import { DEFAULT_DIFFICULTY_WEIGHTS } from '@/types/difficulty';
+import { useDifficultyCalculation } from './useDifficultyCalculation';
 import { useOutlierDetection, type DataPoint } from './useOutlierDetection';
 import { useCorrelationStats } from './useCorrelationStats';
 
@@ -180,7 +182,7 @@ export function useWeightOptimization() {
     let currentCombination = 0;
 
     let bestResult: OptimizationResult = {
-      weights: { digits: 1.0, carryovers: 2.5, zeros: 0.5 },
+      weights: { ...DEFAULT_DIFFICULTY_WEIGHTS },
       correlations: { cl: null, time: null, correctness: null },
       compositeScore: -Infinity,
     };

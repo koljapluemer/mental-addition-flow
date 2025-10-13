@@ -5,6 +5,9 @@ import { useRouter, useRoute } from "vue-router";
 import { db, type UserRecord } from "@/db";
 import { useActiveUser } from "@/composables/useActiveUser";
 import { useUserSettings } from "@/composables/useUserSettings";
+import { useDifficultyCalculation } from "@/composables/useDifficultyCalculation";
+import type { DifficultyWeights } from "@/types/difficulty";
+import { mergeDifficultyWeights } from "@/types/difficulty";
 
 const router = useRouter();
 const route = useRoute();
@@ -19,6 +22,15 @@ const {
   loadUserSettings,
   updateGraduallyIncreaseDifficulty,
 } = useUserSettings();
+
+const {
+  countTotalDigits,
+  countZeros,
+  countCarryovers,
+  calculateDifficultyScore,
+  calculateDifficultyRange,
+  normalizeDifficulty,
+} = useDifficultyCalculation();
 
 let subscription: { unsubscribe: () => void } | null = null;
 
@@ -117,39 +129,9 @@ function escapeCSV(value: any): string {
   return str;
 }
 
-function countTotalDigits(operandA: number, operandB: number): number {
-  return String(operandA).length + String(operandB).length;
-}
-
-function countZeros(operandA: number, operandB: number): number {
-  const strA = String(operandA);
-  const strB = String(operandB);
-  const zeroCount = (strA.match(/0/g) || []).length + (strB.match(/0/g) || []).length;
-  return -zeroCount;
-}
-
-function countCarryovers(operandA: number, operandB: number): number {
-  const strA = String(operandA).split('').reverse();
-  const strB = String(operandB).split('').reverse();
-  const maxLen = Math.max(strA.length, strB.length);
-
-  let carryovers = 0;
-  let carry = 0;
-
-  for (let i = 0; i < maxLen; i++) {
-    const digitA = parseInt(strA[i] || '0');
-    const digitB = parseInt(strB[i] || '0');
-    const sum = digitA + digitB + carry;
-
-    if (sum >= 10) {
-      carryovers++;
-      carry = 1;
-    } else {
-      carry = 0;
-    }
-  }
-
-  return carryovers;
+async function getDifficultyWeights(userId: number): Promise<DifficultyWeights> {
+  const settings = await db.userSettings.get({ userId });
+  return mergeDifficultyWeights(settings?.difficultyWeights);
 }
 
 async function downloadExercisesCSV() {
@@ -159,6 +141,9 @@ async function downloadExercisesCSV() {
   const exercises = await db.exercises
     .where({ userId: activeUserId.value })
     .toArray();
+
+  const weights = await getDifficultyWeights(activeUserId.value);
+  const difficultyRange = calculateDifficultyRange(exercises, weights, "all");
 
   // Load evaluations and build rating map
   const evaluations = await db.evaluations
@@ -200,6 +185,7 @@ async function downloadExercisesCSV() {
     "totalDigits",
     "zeroCount",
     "carryoverCount",
+    "predictedDifficulty",
     "avgCLRating",
   ];
 
@@ -217,6 +203,11 @@ async function downloadExercisesCSV() {
     const zeroCount = countZeros(ex.operandA, ex.operandB);
     const carryoverCount = countCarryovers(ex.operandA, ex.operandB);
     const avgRating = ex.id ? avgRatingMap.get(ex.id) ?? "" : "";
+    const rawDifficulty = calculateDifficultyScore(ex, weights);
+    const normalizedDifficulty = normalizeDifficulty(rawDifficulty, difficultyRange);
+    const predictedDifficulty = Number.isFinite(normalizedDifficulty)
+      ? Number(normalizedDifficulty.toFixed(1))
+      : "";
 
     return [
       ex.id,
@@ -237,6 +228,7 @@ async function downloadExercisesCSV() {
       totalDigits,
       zeroCount,
       carryoverCount,
+      predictedDifficulty,
       avgRating !== "" ? avgRating.toFixed(1) : "",
     ];
   });
