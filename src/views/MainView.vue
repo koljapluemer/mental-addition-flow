@@ -34,22 +34,13 @@ const isProcessingSolve = ref(false);
 const isCountdownActive = ref(false);
 const countdownValue = ref(3);
 const evaluationVisible = ref(false);
-const evaluationScope = ref<EvaluationScope>("this task");
 const evaluationExerciseIds = ref<number[]>([]);
 const evaluationOptions = Array.from({ length: 9 }, (_, index) => index + 1);
 const selectedEvaluationRating = ref<number | null>(null);
 const answerInputRef = ref<HTMLInputElement | null>(null);
 const keystrokeCount = ref(0);
 
-const evaluationScopes: EvaluationScope[] = [
-  "this task",
-  "the last exercise",
-  "the last three exercises",
-  "the last five exercises",
-  "the last 10 exercises",
-];
-
-const evaluationProbability = 0.3;
+const evaluationScope: EvaluationScope = "the last exercise";
 
 const canInteract = computed(
   () =>
@@ -220,12 +211,7 @@ async function handleCorrectAnswer() {
     keystrokeCount: keystrokeCount.value,
   });
 
-  const shouldPrompt = Math.random() < evaluationProbability;
-  if (shouldPrompt) {
-    await openEvaluationPrompt();
-  } else {
-    await startNewExercise();
-  }
+  await openEvaluationPrompt();
 
   isProcessingSolve.value = false;
 }
@@ -239,21 +225,8 @@ async function openEvaluationPrompt() {
     return;
 
   selectedEvaluationRating.value = null;
-  const scope: EvaluationScope =
-    evaluationScopes[Math.floor(Math.random() * evaluationScopes.length)] ??
-    "this task";
-  evaluationScope.value = scope;
 
-  const scopeCounts: Record<EvaluationScope, number> = {
-    "this task": 1,
-    "the last exercise": 1,
-    "the last three exercises": 3,
-    "the last five exercises": 5,
-    "the last 10 exercises": 10,
-  };
-
-  const count = scopeCounts[scope] ?? 1;
-
+  // Get the last exercise (just the current one that was solved)
   const recentExercises = await db.exercises
     .where("[userId+displayedAt]")
     .between(
@@ -261,7 +234,7 @@ async function openEvaluationPrompt() {
       [activeUserId.value, Dexie.maxKey],
     )
     .reverse()
-    .limit(count)
+    .limit(1)
     .toArray();
 
   evaluationExerciseIds.value = recentExercises
@@ -277,7 +250,7 @@ async function openEvaluationPrompt() {
   await logEvaluationPrompt(
     activeUserId.value,
     currentExercise.value.id!,
-    scope,
+    evaluationScope,
     mode.value,
   );
 
@@ -290,7 +263,7 @@ async function submitEvaluation(rating: number) {
 
   const evaluation = await saveEvaluation({
     userId: activeUserId.value,
-    scope: evaluationScope.value,
+    scope: evaluationScope,
     rating,
     exerciseIds: [...evaluationExerciseIds.value],
     mode: mode.value,
@@ -318,7 +291,7 @@ async function skipEvaluation() {
     type: "evaluation_skipped",
     exerciseId: currentExercise.value.id,
     payload: {
-      scope: evaluationScope.value,
+      scope: evaluationScope,
     },
   });
 
@@ -341,7 +314,7 @@ async function selectEvaluationRating(rating: number) {
     exerciseId: referenceExerciseId,
     payload: {
       rating,
-      scope: evaluationScope.value,
+      scope: evaluationScope,
       exerciseIds: [...evaluationExerciseIds.value],
     },
   });
@@ -601,11 +574,7 @@ const inputPlaceholder = computed(() =>
           Paas Cognitive Load Scale
         </p>
         <h3 class="text-2xl font-bold leading-tight">
-          How much mental effort did you invest in
-          <span class="rounded bg-warning/30 px-2 py-1">{{
-            evaluationScope
-          }}</span
-          >?
+          How much mental effort did you invest in the last exercise?
         </h3>
         <p class="text-sm text-base-content/70">
           Select one response that best reflects your effort. Use the full scale.
