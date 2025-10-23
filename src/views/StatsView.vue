@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onUnmounted, ref } from "vue";
+import { onUnmounted, ref, computed } from "vue";
 import { liveQuery } from "dexie";
 import Dexie from "dexie";
 import {
@@ -19,10 +19,12 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
+import { BoxPlotController, BoxAndWiskers } from '@sgratzl/chartjs-chart-boxplot';
+import { Chart } from 'vue-chartjs';
 import DifficultyPredictorSection from "@/components/DifficultyPredictorSection.vue";
 import CognitiveLoadCorrelations from "@/components/CognitiveLoadCorrelations.vue";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, BarElement, Title, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, PointElement, BarElement, Title, Tooltip, Legend, BoxPlotController, BoxAndWiskers);
 
 const { activeUserId } = useActiveUser();
 
@@ -84,6 +86,53 @@ watch(
 onUnmounted(() => {
   subscription?.unsubscribe();
 });
+
+// Box plot data
+const timeDataForBoxPlot = computed(() => {
+  return exercises.value
+    .filter(ex => {
+      if (!ex.solvedAt) return false;
+      if (modeFilter.value !== 'all' && ex.mode !== modeFilter.value) return false;
+      const duration = (ex.solvedAt - ex.displayedAt) / 1000;
+      return duration >= 0.5 && duration <= 120;
+    })
+    .map(ex => (ex.solvedAt! - ex.displayedAt) / 1000);
+});
+
+const boxPlotData = computed(() => ({
+  labels: ['All Exercises'],
+  datasets: [{
+    label: 'Time (seconds)',
+    data: [timeDataForBoxPlot.value],
+    backgroundColor: 'rgba(59, 130, 246, 0.5)',
+    borderColor: 'rgba(59, 130, 246, 1)',
+    borderWidth: 2,
+    outlierColor: 'rgba(239, 68, 68, 0.8)',
+    padding: 10,
+    itemRadius: 3,
+  }],
+}));
+
+const boxPlotOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    title: {
+      display: false,
+    },
+  },
+  scales: {
+    y: {
+      title: {
+        display: true,
+        text: 'Time (seconds)',
+        font: { size: 14 },
+      },
+      min: 0,
+    },
+  },
+}));
 </script>
 
 <template>
@@ -145,6 +194,16 @@ onUnmounted(() => {
       :evaluations="evaluations"
       :mode-filter="modeFilter"
     />
+
+    <!-- Time Distribution Box Plot -->
+    <div v-if="timeDataForBoxPlot.length > 0" class="card border border-base-300 bg-base-100 shadow">
+      <div class="card-body">
+        <h2 class="card-title text-lg">Exercise Time Distribution</h2>
+        <div style="height: 400px">
+          <Chart type="boxplot" :data="boxPlotData" :options="boxPlotOptions" />
+        </div>
+      </div>
+    </div>
 
     <div
       v-if="evaluations.length === 0 && exercises.length === 0"
