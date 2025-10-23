@@ -5,6 +5,7 @@ import { useUserSettings } from "@/composables/useUserSettings";
 import {
   createExerciseRecord,
   markExerciseSolved,
+  markExerciseTimedOut,
   updateExerciseMode,
   attachEvaluation,
 } from "@/db/exercises";
@@ -23,16 +24,15 @@ const { activeUserId, activeUserName } = useActiveUser();
 const {
   graduallyIncreaseDifficulty,
   progressiveDifficultyActivatedAt,
+  exerciseMode,
   loadUserSettings,
+  updateExerciseMode: updateUserExerciseMode,
 } = useUserSettings();
 
-const mode = ref<ExerciseMode>("trial");
 const inputValue = ref("");
 const currentExercise = ref<ExerciseRecord | null>(null);
 const isGeneratingExercise = ref(false);
 const isProcessingSolve = ref(false);
-const isCountdownActive = ref(false);
-const countdownValue = ref(3);
 const evaluationVisible = ref(false);
 const evaluationExerciseIds = ref<number[]>([]);
 const evaluationOptions = Array.from({ length: 9 }, (_, index) => index + 1);
@@ -40,15 +40,30 @@ const selectedEvaluationRating = ref<number | null>(null);
 const answerInputRef = ref<HTMLInputElement | null>(null);
 const keystrokeCount = ref(0);
 
+// Timer state for timed mode
+const timerProgress = ref(100);
+const timerElapsed = ref(0);
+const timerInterval = ref<ReturnType<typeof setInterval> | null>(null);
+const correctAnswerGiven = ref(false);
+const TIMER_DURATION_MS = 5000;
+const TIMER_UPDATE_INTERVAL_MS = 50;
+
 const evaluationScope: EvaluationScope = "the last exercise";
 
 const canInteract = computed(
   () =>
-    !isCountdownActive.value &&
     !evaluationVisible.value &&
-    !!currentExercise.value,
+    !!currentExercise.value &&
+    !correctAnswerGiven.value,
 );
 
+
+function stopTimer() {
+  if (timerInterval.value) {
+    clearInterval(timerInterval.value);
+    timerInterval.value = null;
+  }
+}
 
 function resetState() {
   inputValue.value = "";
@@ -57,9 +72,52 @@ function resetState() {
   isProcessingSolve.value = false;
   evaluationVisible.value = false;
   evaluationExerciseIds.value = [];
-  mode.value = "trial";
   selectedEvaluationRating.value = null;
   keystrokeCount.value = 0;
+  correctAnswerGiven.value = false;
+  timerProgress.value = 100;
+  timerElapsed.value = 0;
+  stopTimer();
+}
+
+function startTimer() {
+  if (!activeUserId.value || !currentExercise.value) return;
+
+  stopTimer();
+  timerElapsed.value = 0;
+  timerProgress.value = 100;
+  correctAnswerGiven.value = false;
+
+  const startTime = Date.now();
+
+  void logEvent({
+    userId: activeUserId.value,
+    type: "timer_started",
+    exerciseId: currentExercise.value.id,
+    payload: { duration: TIMER_DURATION_MS },
+  });
+
+  timerInterval.value = setInterval(async () => {
+    timerElapsed.value = Date.now() - startTime;
+    timerProgress.value = Math.max(0, ((TIMER_DURATION_MS - timerElapsed.value) / TIMER_DURATION_MS) * 100);
+
+    if (timerElapsed.value >= TIMER_DURATION_MS) {
+      stopTimer();
+      await handleTimerComplete();
+    }
+  }, TIMER_UPDATE_INTERVAL_MS);
+}
+
+async function handleTimerComplete() {
+  if (!activeUserId.value || !currentExercise.value?.id) return;
+
+  if (!correctAnswerGiven.value) {
+    // Timer expired without correct answer
+    await markExerciseTimedOut(currentExercise.value.id, activeUserId.value);
+  }
+
+  // Show evaluation prompt
+  await openEvaluationPrompt();
 }
 
 async function startNewExercise(forceMode?: ExerciseMode) {
@@ -92,13 +150,20 @@ async function startNewExercise(forceMode?: ExerciseMode) {
       userId: activeUserId.value,
       operandA: operands.operandA,
       operandB: operands.operandB,
-      mode: forceMode ?? mode.value,
+      mode: forceMode ?? exerciseMode.value,
     });
     currentExercise.value = exercise ?? null;
     inputValue.value = "";
     keystrokeCount.value = 0;
+    correctAnswerGiven.value = false;
+
     await nextTick();
     answerInputRef.value?.focus();
+
+    // Start timer if in timed mode
+    if (exerciseMode.value === "timed") {
+      startTimer();
+    }
   } finally {
     isGeneratingExercise.value = false;
   }
@@ -108,7 +173,6 @@ async function ensureExerciseAvailable() {
   if (
     !currentExercise.value &&
     activeUserId.value &&
-    !isCountdownActive.value &&
     !evaluationVisible.value
   ) {
     await startNewExercise();
@@ -203,15 +267,33 @@ async function handleCorrectAnswer() {
   if (!currentExercise.value.id) return;
 
   isProcessingSolve.value = true;
+  correctAnswerGiven.value = true;
 
   await markExerciseSolved(currentExercise.value.id, {
     userId: activeUserId.value,
     inputValue: inputValue.value,
-    mode: mode.value,
+    mode: exerciseMode.value,
     keystrokeCount: keystrokeCount.value,
+    timedOut: false,
   });
 
-  await openEvaluationPrompt();
+  await logEvent({
+    userId: activeUserId.value,
+    type: "correct_answer_during_timer",
+    exerciseId: currentExercise.value.id,
+    payload: {
+      timerElapsed: timerElapsed.value,
+      timerRemaining: TIMER_DURATION_MS - timerElapsed.value,
+    },
+  });
+
+  // In self-paced mode, immediately show evaluation
+  // In timed mode, wait for timer to complete
+  if (exerciseMode.value === "self-paced") {
+    stopTimer();
+    await openEvaluationPrompt();
+  }
+  // If timed mode, timer will continue and handleTimerComplete will show evaluation
 
   isProcessingSolve.value = false;
 }
@@ -251,7 +333,7 @@ async function openEvaluationPrompt() {
     activeUserId.value,
     currentExercise.value.id!,
     evaluationScope,
-    mode.value,
+    exerciseMode.value,
   );
 
   evaluationVisible.value = true;
@@ -266,7 +348,7 @@ async function submitEvaluation(rating: number) {
     scope: evaluationScope,
     rating,
     exerciseIds: [...evaluationExerciseIds.value],
-    mode: mode.value,
+    mode: exerciseMode.value,
   });
 
   if (evaluation?.id) {
@@ -335,79 +417,34 @@ function handleEvaluationKeydown(event: KeyboardEvent) {
   }
 }
 
-async function applyMode(nextMode: ExerciseMode) {
-  if (!activeUserId.value) return;
-  if (isCountdownActive.value || evaluationVisible.value) return;
-  if (mode.value === nextMode) return;
-
-  const previous = mode.value;
-  mode.value = nextMode;
-
-  await logEvent({
-    userId: activeUserId.value,
-    type: "mode_toggled",
-    payload: { from: previous, to: nextMode },
-  });
-
-  if (nextMode === "serious") {
-    await beginCountdown();
-  } else if (currentExercise.value?.id) {
-    await updateExerciseMode(
-      currentExercise.value.id,
-      "trial",
-      activeUserId.value,
-    );
-  }
-}
-
 async function onModeToggle(event: Event) {
   if (!activeUserId.value) return;
   const target = event.target as HTMLInputElement;
-  const nextMode: ExerciseMode = target.checked ? "serious" : "trial";
-  await applyMode(nextMode);
-}
+  const nextMode: ExerciseMode = target.checked ? "timed" : "self-paced";
 
-async function beginCountdown() {
-  if (!activeUserId.value) return;
+  if (exerciseMode.value === nextMode) return;
 
-  isCountdownActive.value = true;
-  countdownValue.value = 3;
+  const previous = exerciseMode.value;
 
-  const previousExerciseId = currentExercise.value?.id;
-  currentExercise.value = null;
-
-  if (previousExerciseId) {
-    await logEvent({
-      userId: activeUserId.value,
-      type: "exercise_replaced",
-      exerciseId: previousExerciseId,
-      payload: { reason: "serious_mode_countdown" },
-    });
-  }
+  await updateUserExerciseMode(activeUserId.value, nextMode);
 
   await logEvent({
     userId: activeUserId.value,
-    type: "countdown_started",
-    payload: { seconds: 3 },
+    type: "exercise_mode_changed",
+    payload: { from: previous, to: nextMode },
   });
 
-  for (let i = 3; i > 0; i -= 1) {
-    countdownValue.value = i;
-    await logEvent({
-      userId: activeUserId.value,
-      type: "countdown_tick",
-      payload: { value: i },
-    });
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+  // Replace current exercise with new mode
+  if (currentExercise.value?.id) {
+    await updateExerciseMode(
+      currentExercise.value.id,
+      nextMode,
+      activeUserId.value,
+    );
   }
 
-  isCountdownActive.value = false;
-  await logEvent({
-    userId: activeUserId.value,
-    type: "countdown_completed",
-    payload: { mode: "serious" },
-  });
-  await startNewExercise("serious");
+  stopTimer();
+  await startNewExercise();
 }
 
 function handleVisibilityChange() {
@@ -454,15 +491,6 @@ watch(
   { immediate: true },
 );
 
-watch(
-  () => mode.value,
-  (value) => {
-    if (value === "trial" && isCountdownActive.value) {
-      isCountdownActive.value = false;
-    }
-  },
-);
-
 onMounted(async () => {
   await ensureExerciseAvailable();
   document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -472,6 +500,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  stopTimer();
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   window.removeEventListener("focus", handleWindowFocus);
   window.removeEventListener("blur", handleWindowBlur);
@@ -484,7 +513,7 @@ const exerciseDisplay = computed(() => {
 });
 
 const inputPlaceholder = computed(() =>
-  mode.value === "serious" ? "Type answer" : "Your answer",
+  exerciseMode.value === "timed" ? "Type answer" : "Your answer",
 );
 </script>
 
@@ -497,27 +526,36 @@ const inputPlaceholder = computed(() =>
     >
       <div class="flex items-center gap-4">
         <span class="badge badge-primary badge-outline">{{
-          mode.toUpperCase()
+          exerciseMode.toUpperCase().replace('-', ' ')
         }}</span>
         <label class="flex items-center gap-3 text-sm font-semibold">
           <span class="uppercase tracking-wide text-base-content/50"
-            >Trial</span
+            >Self-Paced</span
           >
           <input
             type="checkbox"
             class="toggle toggle-primary"
-            :checked="mode === 'serious'"
-            :disabled="isCountdownActive || evaluationVisible || !activeUserId"
+            :checked="exerciseMode === 'timed'"
+            :disabled="evaluationVisible || !activeUserId"
             @change="onModeToggle"
           />
           <span class="uppercase tracking-wide text-base-content/50"
-            >Serious</span
+            >Timed</span
           >
         </label>
       </div>
       <div class="text-sm uppercase tracking-widest text-base-content/60">
         {{ activeUserName }}
       </div>
+    </div>
+
+    <!-- Timer Progress Bar (only in timed mode) -->
+    <div v-if="exerciseMode === 'timed' && currentExercise" class="w-full">
+      <progress
+        class="progress progress-primary w-full h-2"
+        :value="timerProgress"
+        max="100"
+      ></progress>
     </div>
 
     <div
@@ -557,15 +595,6 @@ const inputPlaceholder = computed(() =>
       </label>
     </div>
   </section>
-
-  <Transition name="fade">
-    <div
-      v-if="isCountdownActive"
-      class="fixed inset-0 z-30 flex items-center justify-center bg-base-100/95 backdrop-blur"
-    >
-      <div class="text-7xl font-black">{{ countdownValue }}</div>
-    </div>
-  </Transition>
 
   <dialog v-if="evaluationVisible" class="modal modal-open">
     <div class="modal-box max-w-3xl space-y-6">
@@ -624,15 +653,3 @@ const inputPlaceholder = computed(() =>
     </div>
   </dialog>
 </template>
-
-<style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.25s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-</style>

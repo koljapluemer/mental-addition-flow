@@ -1,6 +1,6 @@
 import Dexie, { type Table } from "dexie";
 
-export type ExerciseMode = "trial" | "serious";
+export type ExerciseMode = "self-paced" | "timed";
 
 export interface UserRecord {
   id?: number;
@@ -20,6 +20,7 @@ export interface ExerciseRecord {
   mode: ExerciseMode;
   evaluationId?: number;
   keystrokeCount?: number;
+  timedOut?: boolean;
 }
 
 export interface EventRecord {
@@ -53,6 +54,7 @@ export interface UserSettingsRecord {
   userId: number;
   graduallyIncreaseDifficulty: boolean;
   progressiveDifficultyActivatedAt?: number;
+  exerciseMode?: ExerciseMode;
   updatedAt: number;
   difficultyWeights?: {
     digits: number;
@@ -82,6 +84,27 @@ class AppDatabase extends Dexie {
       events: "++id,userId,exerciseId,type,timestamp",
       evaluations: "++id,userId,createdAt,scope,mode",
       userSettings: "++id,&userId,updatedAt",
+    });
+    this.version(4).stores({
+      users: "++id,&name,lastActiveAt",
+      exercises: "++id,userId,mode,displayedAt,solvedAt,[userId+displayedAt]",
+      events: "++id,userId,exerciseId,type,timestamp",
+      evaluations: "++id,userId,createdAt,scope,mode",
+      userSettings: "++id,&userId,updatedAt",
+    }).upgrade(async (trans) => {
+      // Migrate existing exercise modes: "trial" and "serious" -> "self-paced"
+      await trans.table("exercises").toCollection().modify((exercise: any) => {
+        if (exercise.mode === "trial" || exercise.mode === "serious") {
+          exercise.mode = "self-paced";
+        }
+      });
+
+      // Migrate existing evaluation modes
+      await trans.table("evaluations").toCollection().modify((evaluation: any) => {
+        if (evaluation.mode === "trial" || evaluation.mode === "serious") {
+          evaluation.mode = "self-paced";
+        }
+      });
     });
   }
 }

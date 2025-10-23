@@ -19,8 +19,10 @@ const errorMessage = ref("");
 const { setActiveUser, createUser, activeUserId } = useActiveUser();
 const {
   graduallyIncreaseDifficulty,
+  exerciseMode,
   loadUserSettings,
   updateGraduallyIncreaseDifficulty,
+  updateExerciseMode,
 } = useUserSettings();
 
 const {
@@ -88,6 +90,13 @@ async function handleToggleDifficulty(event: Event) {
   if (!activeUserId.value) return;
   const target = event.target as HTMLInputElement;
   await updateGraduallyIncreaseDifficulty(activeUserId.value, target.checked);
+}
+
+async function handleToggleExerciseMode(event: Event) {
+  if (!activeUserId.value) return;
+  const target = event.target as HTMLInputElement;
+  const mode = target.checked ? "timed" : "self-paced";
+  await updateExerciseMode(activeUserId.value, mode);
 }
 
 watch(activeUserId, async (userId) => {
@@ -314,6 +323,29 @@ async function downloadEvaluationsCSV() {
     >
       <div class="card-body">
         <h2 class="card-title text-lg">Settings</h2>
+
+        <div class="form-control">
+          <label class="label cursor-pointer justify-start gap-4">
+            <input
+              type="checkbox"
+              class="toggle toggle-primary"
+              :checked="exerciseMode === 'timed'"
+              @change="handleToggleExerciseMode"
+            />
+            <div class="space-y-1">
+              <span class="label-text font-semibold"
+                >Exercise Mode</span
+              >
+              <p class="text-sm text-base-content/60">
+                <strong>Self-Paced:</strong> Work at your own pace, no time limit<br/>
+                <strong>Timed:</strong> 5 seconds per exercise to test your speed
+              </p>
+            </div>
+          </label>
+        </div>
+
+        <div class="divider"></div>
+
         <div class="form-control">
           <label class="label cursor-pointer justify-start gap-4">
             <input

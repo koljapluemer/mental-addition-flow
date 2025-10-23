@@ -1,8 +1,9 @@
 import { ref } from "vue";
-import { db } from "@/db";
+import { db, type ExerciseMode } from "@/db";
 
 const graduallyIncreaseDifficulty = ref(false);
 const progressiveDifficultyActivatedAt = ref<number | undefined>(undefined);
+const exerciseMode = ref<ExerciseMode>("self-paced");
 
 export function useUserSettings() {
   async function loadUserSettings(userId: number) {
@@ -10,10 +11,12 @@ export function useUserSettings() {
     if (settings) {
       graduallyIncreaseDifficulty.value = settings.graduallyIncreaseDifficulty;
       progressiveDifficultyActivatedAt.value = settings.progressiveDifficultyActivatedAt;
+      exerciseMode.value = settings.exerciseMode ?? "self-paced";
     } else {
       // Default values
       graduallyIncreaseDifficulty.value = false;
       progressiveDifficultyActivatedAt.value = undefined;
+      exerciseMode.value = "self-paced";
     }
   }
 
@@ -45,10 +48,32 @@ export function useUserSettings() {
     progressiveDifficultyActivatedAt.value = activatedAt;
   }
 
+  async function updateExerciseMode(userId: number, mode: ExerciseMode) {
+    const existing = await db.userSettings.get({ userId });
+    const now = Date.now();
+
+    if (existing) {
+      await db.userSettings.update(existing.id!, {
+        exerciseMode: mode,
+        updatedAt: now,
+      });
+    } else {
+      await db.userSettings.add({
+        userId,
+        graduallyIncreaseDifficulty: false,
+        exerciseMode: mode,
+        updatedAt: now,
+      });
+    }
+    exerciseMode.value = mode;
+  }
+
   return {
     graduallyIncreaseDifficulty,
     progressiveDifficultyActivatedAt,
+    exerciseMode,
     loadUserSettings,
     updateGraduallyIncreaseDifficulty,
+    updateExerciseMode,
   };
 }

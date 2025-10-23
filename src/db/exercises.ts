@@ -46,17 +46,20 @@ export async function markExerciseSolved(
     inputValue,
     mode,
     keystrokeCount,
+    timedOut,
   }: {
     userId: number;
     inputValue: string;
     mode: ExerciseMode;
     keystrokeCount?: number;
+    timedOut?: boolean;
   },
 ) {
   const solvedAt = Date.now();
   await db.exercises.update(exerciseId, {
     solvedAt,
     keystrokeCount,
+    timedOut,
   });
   await logEvent({
     userId,
@@ -66,8 +69,28 @@ export async function markExerciseSolved(
       mode,
       inputValue,
       keystrokeCount,
+      timedOut,
     },
     timestamp: solvedAt,
+  });
+}
+
+export async function markExerciseTimedOut(
+  exerciseId: number,
+  userId: number,
+) {
+  const timedOutAt = Date.now();
+  await db.exercises.update(exerciseId, {
+    timedOut: true,
+  });
+  await logEvent({
+    userId,
+    type: "exercise_timed_out",
+    exerciseId,
+    payload: {
+      timedOutAt,
+    },
+    timestamp: timedOutAt,
   });
 }
 

@@ -291,7 +291,7 @@ function countCarryovers(operandA: number, operandB: number): number {
                 v-if="entry.type === 'exercise' && entry.exercise"
                 class="badge badge-sm"
                 :class="
-                  entry.exercise.mode === 'serious'
+                  entry.exercise.mode === 'timed'
                     ? 'badge-error'
                     : 'badge-neutral'
                 "
@@ -302,7 +302,7 @@ function countCarryovers(operandA: number, operandB: number): number {
                 v-if="entry.type === 'evaluation' && entry.evaluation"
                 class="badge badge-sm"
                 :class="
-                  entry.evaluation.mode === 'serious'
+                  entry.evaluation.mode === 'timed'
                     ? 'badge-error'
                     : 'badge-neutral'
                 "

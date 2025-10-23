@@ -154,8 +154,8 @@ const boxPlotOptions = computed(() => ({
             </label>
             <select v-model="modeFilter" class="select select-bordered select-sm">
               <option value="all">All modes</option>
-              <option value="trial">Trial only</option>
-              <option value="serious">Serious only</option>
+              <option value="self-paced">Self-Paced only</option>
+              <option value="timed">Timed only</option>
             </select>
           </div>
 
